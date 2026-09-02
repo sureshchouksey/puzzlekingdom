@@ -81,3 +81,16 @@ export type GenerateResponse = {
 export type ApiErrorBody = {
   error: string;
 };
+
+export type ManualQuestionInput = {
+  questionText: string;
+  options: QuizOption[];
+  correctOptionId: string;
+  explanation: string;
+};
+
+export type SaveManualQuestionsResponse = {
+  status: string;
+  questionCount: number;
+  documentId: string;
+};

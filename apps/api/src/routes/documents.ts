@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { documents, subjects } from "../db/schema.js";
 import { uploadDocument, downloadDocument } from "../lib/storage.js";
-import { ensureSubject, saveGeneratedQuestions } from "../lib/save-questions.js";
+import { ensureSubject, saveGeneratedQuestions, createSeedDocument } from "../lib/save-questions.js";
+import { generatedQuestionSetSchema } from "../lib/question-schema.js";
 import { generateQuestionsFromDocument } from "../services/generate-questions.js";
 import { estimateGenerationCosts } from "../lib/ai-pricing.js";
 import type { AiProvider } from "../services/providers/types.js";
@@ -46,6 +47,40 @@ export async function documentRoutes(app: FastifyInstance) {
 
     return reply.status(201).send({ id: doc.id, status: doc.status });
   });
+
+  // "I already have questions" path: save a hand-entered (or otherwise
+  // already-known) set of questions straight to the database, with no AI
+  // call at all - the other option alongside AI generation, for content
+  // like the CSSE past papers where the real correct answers are already
+  // known and don't need to be (re)derived by a model.
+  app.post<{ Body: { subjectName?: string; filename?: string; questions?: unknown } }>(
+    "/documents/manual",
+    async (request, reply) => {
+      const subjectName = request.body?.subjectName;
+      const filename = request.body?.filename?.trim() || "Manually entered content";
+      const rawQuestions = request.body?.questions;
+
+      if (!subjectName) return reply.status(400).send({ error: "subjectName is required" });
+      if (!rawQuestions) return reply.status(400).send({ error: "questions is required" });
+
+      const parsed = generatedQuestionSetSchema.safeParse(rawQuestions);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "Invalid questions - each needs questionText, 3-6 options with unique ids, a correctOptionId matching one of them, and an explanation.",
+          details: parsed.error.issues,
+        });
+      }
+
+      const doc = await createSeedDocument({ subjectName, filename, mimeType: "text/plain" });
+      const result = await saveGeneratedQuestions({
+        subjectName,
+        documentId: doc.id,
+        rawQuestions: parsed.data,
+      });
+
+      return reply.status(201).send({ status: "ready", questionCount: result.count, documentId: doc.id });
+    }
+  );
 
   // Before generating, show the user what each provider would cost for the
   // requested number of questions, so they can choose - never picked for

@@ -12,7 +12,8 @@
     "seed:questions": "tsx --env-file=.env scripts/seed-questions.ts",
     "test:e2e": "tsx --env-file=.env scripts/test-e2e.ts",
     "test:estimate": "tsx --env-file=.env scripts/test-estimate.ts",
-    "test:quiz": "tsx --env-file=.env scripts/test-quiz-flow.ts"
+    "test:quiz": "tsx --env-file=.env scripts/test-quiz-flow.ts",
+    "test:manual": "tsx --env-file=.env scripts/test-manual-seed.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

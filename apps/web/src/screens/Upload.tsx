@@ -1,18 +1,43 @@
 import { useState } from "react";
-import { estimateGeneration, generateQuestions, uploadDocument } from "../api";
-import type { AiProvider, ProviderCostEstimate } from "../types";
+import { estimateGeneration, generateQuestions, saveManualQuestions, uploadDocument } from "../api";
+import type { AiProvider, ManualQuestionInput, ProviderCostEstimate } from "../types";
 import { Layout, styles } from "./Layout";
 
+type Mode = "ai" | "manual";
 type Step = "form" | "uploading" | "estimating" | "choosing" | "generating" | "done" | "error";
 
+const OPTION_LABELS = ["a", "b", "c", "d"] as const;
+
+type Draft = {
+  questionText: string;
+  options: [string, string, string, string];
+  correctIndex: number;
+  explanation: string;
+};
+
+function emptyDraft(): Draft {
+  return { questionText: "", options: ["", "", "", ""], correctIndex: 0, explanation: "" };
+}
+
+function draftIsComplete(d: Draft): boolean {
+  return d.questionText.trim().length > 0 && d.options.every((o) => o.trim().length > 0) && d.explanation.trim().length > 0;
+}
+
 export function Upload({ onBack }: { onBack: () => void }) {
+  const [mode, setMode] = useState<Mode>("ai");
   const [subjectName, setSubjectName] = useState("");
+
+  // AI-generation path state
   const [file, setFile] = useState<File | null>(null);
   const [count, setCount] = useState(8);
   const [step, setStep] = useState<Step>("form");
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [estimates, setEstimates] = useState<ProviderCostEstimate[]>([]);
   const [provider, setProvider] = useState<AiProvider>("claude");
+
+  // Manual-entry path state
+  const [drafts, setDrafts] = useState<Draft[]>([emptyDraft()]);
+
   const [error, setError] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
 
@@ -50,8 +75,70 @@ export function Upload({ onBack }: { onBack: () => void }) {
     }
   }
 
+  function updateDraft(index: number, patch: Partial<Draft>) {
+    setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+  }
+
+  function updateOption(index: number, optionIndex: number, value: string) {
+    setDrafts((prev) =>
+      prev.map((d, i) => {
+        if (i !== index) return d;
+        const options = [...d.options] as Draft["options"];
+        options[optionIndex] = value;
+        return { ...d, options };
+      })
+    );
+  }
+
+  async function handleSaveManual() {
+    if (!subjectName.trim() || drafts.some((d) => !draftIsComplete(d))) return;
+    setError(null);
+    setStep("generating"); // reused as a generic "saving" spinner state
+    try {
+      const questions: ManualQuestionInput[] = drafts.map((d) => ({
+        questionText: d.questionText.trim(),
+        options: d.options.map((text, i) => ({ id: OPTION_LABELS[i], text: text.trim() })),
+        correctOptionId: OPTION_LABELS[d.correctIndex],
+        explanation: d.explanation.trim(),
+      }));
+      const res = await saveManualQuestions({ subjectName: subjectName.trim(), questions });
+      setResultMessage(`Saved ${res.questionCount} question(s) to the database - no AI call needed.`);
+      setStep("done");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save questions");
+      setStep("error");
+    }
+  }
+
+  const allManualComplete = drafts.length > 0 && drafts.every(draftIsComplete);
+
   return (
     <Layout title="Add new content" onBack={onBack}>
+      {step === "form" && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
+          <button
+            onClick={() => setMode("ai")}
+            style={{
+              ...styles.secondaryButton,
+              background: mode === "ai" ? "#1a3c6e" : styles.secondaryButton.background,
+              color: mode === "ai" ? "#fff" : styles.secondaryButton.color,
+            }}
+          >
+            Generate with AI
+          </button>
+          <button
+            onClick={() => setMode("manual")}
+            style={{
+              ...styles.secondaryButton,
+              background: mode === "manual" ? "#1a3c6e" : styles.secondaryButton.background,
+              color: mode === "manual" ? "#fff" : styles.secondaryButton.color,
+            }}
+          >
+            I already have questions
+          </button>
+        </div>
+      )}
+
       {(step === "form" || step === "uploading") && (
         <>
           <label style={{ display: "block", marginBottom: 16 }}>
@@ -64,34 +151,114 @@ export function Upload({ onBack }: { onBack: () => void }) {
             />
           </label>
 
-          <label style={{ display: "block", marginBottom: 16 }}>
-            <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>PDF or image of the content</span>
-            <input
-              type="file"
-              accept="application/pdf,image/png,image/jpeg,image/webp"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
+          {mode === "ai" && (
+            <>
+              <label style={{ display: "block", marginBottom: 16 }}>
+                <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>PDF or image of the content</span>
+                <input
+                  type="file"
+                  accept="application/pdf,image/png,image/jpeg,image/webp"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
 
-          <label style={{ display: "block", marginBottom: 20 }}>
-            <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>Number of questions to generate</span>
-            <input
-              type="number"
-              min={1}
-              max={20}
-              value={count}
-              onChange={(e) => setCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
-              style={{ padding: "8px 12px", fontSize: 15, width: 80 }}
-            />
-          </label>
+              <label style={{ display: "block", marginBottom: 20 }}>
+                <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>
+                  Number of questions to generate
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={count}
+                  onChange={(e) => setCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                  style={{ padding: "8px 12px", fontSize: 15, width: 80 }}
+                />
+              </label>
 
-          <button
-            style={styles.primaryButton}
-            onClick={handleUploadAndEstimate}
-            disabled={!file || !subjectName.trim() || step === "uploading"}
-          >
-            {step === "uploading" ? "Uploading..." : "Upload & get cost estimate"}
-          </button>
+              <button
+                style={styles.primaryButton}
+                onClick={handleUploadAndEstimate}
+                disabled={!file || !subjectName.trim() || step === "uploading"}
+              >
+                {step === "uploading" ? "Uploading..." : "Upload & get cost estimate"}
+              </button>
+            </>
+          )}
+
+          {mode === "manual" && (
+            <>
+              <p style={{ ...styles.muted, marginBottom: 20 }}>
+                Type in questions you already know the answers to (like a real past paper) - these get saved
+                straight to the database with no AI call, so there's no cost and the answers are exactly what
+                you typed.
+              </p>
+
+              {drafts.map((draft, i) => (
+                <div key={i} style={styles.card}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <span style={{ fontWeight: 600 }}>Question {i + 1}</span>
+                    {drafts.length > 1 && (
+                      <button
+                        onClick={() => setDrafts((prev) => prev.filter((_, idx) => idx !== i))}
+                        style={{ background: "none", border: "none", color: "#8a1f11", cursor: "pointer", fontSize: 13 }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+
+                  <input
+                    value={draft.questionText}
+                    onChange={(e) => updateDraft(i, { questionText: e.target.value })}
+                    placeholder="Question text"
+                    style={{ padding: "8px 12px", fontSize: 15, width: "100%", marginBottom: 10, boxSizing: "border-box" }}
+                  />
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                    {draft.options.map((opt, oi) => (
+                      <div key={oi} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input
+                          type="radio"
+                          name={`correct-${i}`}
+                          checked={draft.correctIndex === oi}
+                          onChange={() => updateDraft(i, { correctIndex: oi })}
+                          title="Mark as the correct answer"
+                        />
+                        <input
+                          value={opt}
+                          onChange={(e) => updateOption(i, oi, e.target.value)}
+                          placeholder={`Option ${OPTION_LABELS[oi].toUpperCase()}${draft.correctIndex === oi ? " (correct)" : ""}`}
+                          style={{ padding: "6px 10px", fontSize: 14, flex: 1 }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <textarea
+                    value={draft.explanation}
+                    onChange={(e) => updateDraft(i, { explanation: e.target.value })}
+                    placeholder="Explanation shown after the child answers"
+                    rows={2}
+                    style={{ padding: "8px 12px", fontSize: 14, width: "100%", boxSizing: "border-box", fontFamily: "inherit" }}
+                  />
+                </div>
+              ))}
+
+              <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                <button style={styles.secondaryButton} onClick={() => setDrafts((prev) => [...prev, emptyDraft()])}>
+                  + Add another question
+                </button>
+                <button
+                  style={styles.primaryButton}
+                  onClick={handleSaveManual}
+                  disabled={!subjectName.trim() || !allManualComplete}
+                >
+                  Save {drafts.length} question{drafts.length === 1 ? "" : "s"} to database
+                </button>
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -142,7 +309,9 @@ export function Upload({ onBack }: { onBack: () => void }) {
         </>
       )}
 
-      {step === "generating" && <p style={styles.muted}>Generating questions - this can take up to 20 seconds...</p>}
+      {step === "generating" && (
+        <p style={styles.muted}>{mode === "ai" ? "Generating questions - this can take up to 20 seconds..." : "Saving..."}</p>
+      )}
 
       {step === "done" && (
         <>
