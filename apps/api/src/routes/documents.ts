@@ -47,41 +47,59 @@ export async function documentRoutes(app: FastifyInstance) {
 
   // Reads a stored document, calls Claude with the schema-constrained
   // prompt, validates and saves `questions`, flips status to "ready".
-  app.post<{ Params: { id: string } }>("/documents/:id/generate", async (request, reply) => {
-    const { id } = request.params;
+  app.post<{ Params: { id: string }; Querystring: { force?: string } }>(
+    "/documents/:id/generate",
+    async (request, reply) => {
+      const { id } = request.params;
+      const force = request.query.force === "true";
 
-    const [doc] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
-    if (!doc) return reply.status(404).send({ error: "Document not found" });
+      const [doc] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
+      if (!doc) return reply.status(404).send({ error: "Document not found" });
 
-    const [subject] = await db.select().from(subjects).where(eq(subjects.id, doc.subjectId)).limit(1);
-    if (!subject) return reply.status(404).send({ error: "Subject not found" });
+      // Generation is a one-time activity per document, not something that
+      // happens every time someone takes a quiz - quiz-taking only ever
+      // reads questions already saved here. Refuse to call the AI (and
+      // spend money) again for a document that's already been processed,
+      // unless the caller explicitly asks to regenerate with ?force=true.
+      if (doc.status === "processing") {
+        return reply.status(409).send({ error: "Generation already in progress for this document." });
+      }
+      if (doc.status === "ready" && !force) {
+        return reply.status(409).send({
+          error: "Questions were already generated for this document. Pass ?force=true to regenerate.",
+        });
+      }
 
-    await db.update(documents).set({ status: "processing" }).where(eq(documents.id, id));
+      const [subject] = await db.select().from(subjects).where(eq(subjects.id, doc.subjectId)).limit(1);
+      if (!subject) return reply.status(404).send({ error: "Subject not found" });
 
-    try {
-      const buffer = await downloadDocument(doc.storagePath);
-      const generated = await generateQuestionsFromDocument({
-        fileBase64: buffer.toString("base64"),
-        mimeType: doc.mimeType,
-        subjectName: subject.name,
-      });
+      await db.update(documents).set({ status: "processing" }).where(eq(documents.id, id));
 
-      const result = await saveGeneratedQuestions({
-        subjectName: subject.name,
-        documentId: doc.id,
-        rawQuestions: generated,
-      });
+      try {
+        const buffer = await downloadDocument(doc.storagePath);
+        const generated = await generateQuestionsFromDocument({
+          fileBase64: buffer.toString("base64"),
+          mimeType: doc.mimeType,
+          subjectName: subject.name,
+        });
 
-      await db.update(documents).set({ status: "ready" }).where(eq(documents.id, id));
+        const result = await saveGeneratedQuestions({
+          subjectName: subject.name,
+          documentId: doc.id,
+          rawQuestions: generated,
+        });
 
-      return reply.send({ status: "ready", questionCount: result.count });
-    } catch (err) {
-      app.log.error(err);
-      await db
-        .update(documents)
-        .set({ status: "failed", failureReason: err instanceof Error ? err.message : "Unknown error" })
-        .where(eq(documents.id, id));
-      return reply.status(500).send({ error: "Generation failed" });
+        await db.update(documents).set({ status: "ready" }).where(eq(documents.id, id));
+
+        return reply.send({ status: "ready", questionCount: result.count });
+      } catch (err) {
+        app.log.error(err);
+        await db
+          .update(documents)
+          .set({ status: "failed", failureReason: err instanceof Error ? err.message : "Unknown error" })
+          .where(eq(documents.id, id));
+        return reply.status(500).send({ error: "Generation failed" });
+      }
     }
-  });
+  );
 }
