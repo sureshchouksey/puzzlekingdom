@@ -1,0 +1,86 @@
+// Puzzle Kingdom - MVP1 schema
+// subjects -> documents -> questions, and quiz_attempts -> quiz_attempt_answers -> questions
+// See docs/PLAN.md "Database schema (first cut)" for the reasoning behind this shape.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Subject {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  documents Document[]
+  questions Question[]
+  attempts  QuizAttempt[]
+
+  @@map("subjects")
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+model Document {
+  id               String         @id @default(cuid())
+  subjectId        String         @map("subject_id")
+  subject          Subject        @relation(fields: [subjectId], references: [id])
+  originalFilename String         @map("original_filename")
+  storagePath      String         @map("storage_path")
+  mimeType         String         @map("mime_type")
+  status           DocumentStatus @default(UPLOADED)
+  failureReason    String?        @map("failure_reason")
+  uploadedAt       DateTime       @default(now()) @map("uploaded_at")
+  questions        Question[]
+
+  @@map("documents")
+}
+
+model Question {
+  id               String   @id @default(cuid())
+  documentId       String   @map("document_id")
+  document         Document @relation(fields: [documentId], references: [id])
+  subjectId        String   @map("subject_id")
+  subject          Subject  @relation(fields: [subjectId], references: [id])
+  questionText     String   @map("question_text")
+  // options: [{ "id": "a", "text": "..." }, ...]
+  options          Json
+  correctOptionId  String   @map("correct_option_id")
+  explanation      String
+  createdAt        DateTime @default(now()) @map("created_at")
+  answers          QuizAttemptAnswer[]
+
+  @@map("questions")
+}
+
+model QuizAttempt {
+  id             String    @id @default(cuid())
+  subjectId      String    @map("subject_id")
+  subject        Subject   @relation(fields: [subjectId], references: [id])
+  startedAt      DateTime  @default(now()) @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  score          Int?
+  totalQuestions Int       @map("total_questions")
+  answers        QuizAttemptAnswer[]
+
+  @@map("quiz_attempts")
+}
+
+model QuizAttemptAnswer {
+  id               String      @id @default(cuid())
+  attemptId        String      @map("attempt_id")
+  attempt          QuizAttempt @relation(fields: [attemptId], references: [id])
+  questionId       String      @map("question_id")
+  question         Question    @relation(fields: [questionId], references: [id])
+  selectedOptionId String      @map("selected_option_id")
+  isCorrect        Boolean     @map("is_correct")
+
+  @@map("quiz_attempt_answers")
+}
