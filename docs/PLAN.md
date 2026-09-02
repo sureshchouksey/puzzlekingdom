@@ -25,7 +25,7 @@ Python (FastAPI) remains a completely reasonable alternative if you'd rather wor
 | Frontend | React + TypeScript (Vite), a small SPA — four screens: Upload, Subject picker, Quiz, Results. Plain, functional styling for now; the Puzzle Kingdom visual design already published can be layered on once the core loop works. |
 | Backend | Node.js + TypeScript, Fastify (a lean, well-typed API framework), Zod for validating both incoming requests and the AI's generated output. |
 | AI | Anthropic API (Claude), called server-side with the uploaded PDF/image as a document/image content block and a tool-use call that forces the response into a strict question schema — never free text parsed after the fact. |
-| Database | PostgreSQL, via Supabase (Postgres + file storage together, generous free tier) — Prisma as the ORM. |
+| Database | PostgreSQL, via Supabase (Postgres + file storage together, generous free tier) — Drizzle ORM (Prisma was tried first but its native query-engine binary download is blocked on this network; Drizzle is pure TypeScript, no binary needed). |
 | File storage | Supabase Storage, for the uploaded source PDFs/images. |
 | Deployment | React app on Vercel or Netlify (static hosting); Fastify API on Railway or Render (a small always-on Node service — simpler to reason about than serverless for this MVP's synchronous upload→AI→save flow); database on Supabase. |
 
