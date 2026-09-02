@@ -11,11 +11,13 @@ import { fileURLToPath } from "node:url";
 import { uploadDocument } from "../src/lib/storage.js";
 import { generateQuestionsFromDocument } from "../src/services/generate-questions.js";
 import { createSeedDocument, saveGeneratedQuestions } from "../src/lib/save-questions.js";
+import { env } from "../src/env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PDF_PATH = path.join(__dirname, "..", "..", "..", "docs", "sample-content", "Year3_Maths_Sample_Course_Content.pdf");
 
 async function main() {
+  console.log(`Using AI_PROVIDER=${env.AI_PROVIDER}`);
   console.log("1/4  Reading sample PDF from", PDF_PATH);
   const buffer = await readFile(PDF_PATH);
   const base64 = buffer.toString("base64");
@@ -25,14 +27,14 @@ async function main() {
   await uploadDocument({ buffer, path: storagePath, mimeType: "application/pdf" });
   console.log("     OK - stored at", storagePath);
 
-  console.log("3/4  Calling Claude to generate questions from the PDF content (this takes ~10-20s)...");
+  console.log(`3/4  Calling ${env.AI_PROVIDER} to generate questions from the PDF content (this takes ~10-20s)...`);
   const generated = await generateQuestionsFromDocument({
     fileBase64: base64,
     mimeType: "application/pdf",
     subjectName: "Maths",
     count: 5,
   });
-  console.log(`     OK - Claude returned ${generated.length} questions`);
+  console.log(`     OK - ${env.AI_PROVIDER} returned ${generated.length} questions`);
 
   console.log("4/4  Saving questions to the database...");
   const doc = await createSeedDocument({
