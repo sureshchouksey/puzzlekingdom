@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "seed:questions": "tsx --env-file=.env scripts/seed-questions.ts",
-    "test:e2e": "tsx --env-file=.env scripts/test-e2e.ts"
+    "test:e2e": "tsx --env-file=.env scripts/test-e2e.ts",
+    "test:estimate": "tsx --env-file=.env scripts/test-estimate.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

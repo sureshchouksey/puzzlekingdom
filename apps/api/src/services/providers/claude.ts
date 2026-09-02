@@ -51,3 +51,34 @@ export async function generateQuestionsWithClaude(params: GenerateQuestionsParam
   const input = toolUse.input as { questions: unknown };
   return generatedQuestionSetSchema.parse(input.questions);
 }
+
+// Real input-token count via Anthropic's free token-counting endpoint, using
+// the exact same messages + tool schema the real generation call would send
+// - so the estimate reflects reality rather than a guess.
+export async function countClaudeInputTokens(params: GenerateQuestionsParams): Promise<number> {
+  const documentBlock =
+    params.mimeType === "application/pdf"
+      ? {
+          type: "document" as const,
+          source: { type: "base64" as const, media_type: "application/pdf" as const, data: params.fileBase64 },
+        }
+      : {
+          type: "image" as const,
+          source: { type: "base64" as const, media_type: params.mimeType as "image/png" | "image/jpeg" | "image/webp", data: params.fileBase64 },
+        };
+
+  const result = await getClient().messages.countTokens({
+    model: "claude-sonnet-4-5",
+    tools: [RETURN_QUESTIONS_TOOL],
+    messages: [
+      {
+        role: "user",
+        content: [
+          documentBlock,
+          { type: "text", text: buildGenerationPrompt({ subjectName: params.subjectName, count: params.count ?? 8 }) },
+        ],
+      },
+    ],
+  });
+  return result.input_tokens;
+}

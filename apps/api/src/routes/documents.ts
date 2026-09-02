@@ -6,6 +6,8 @@ import { documents, subjects } from "../db/schema.js";
 import { uploadDocument, downloadDocument } from "../lib/storage.js";
 import { ensureSubject, saveGeneratedQuestions } from "../lib/save-questions.js";
 import { generateQuestionsFromDocument } from "../services/generate-questions.js";
+import { estimateGenerationCosts } from "../lib/ai-pricing.js";
+import type { AiProvider } from "../services/providers/types.js";
 
 const ALLOWED_MIME = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp"]);
 
@@ -45,13 +47,47 @@ export async function documentRoutes(app: FastifyInstance) {
     return reply.status(201).send({ id: doc.id, status: doc.status });
   });
 
-  // Reads a stored document, calls Claude with the schema-constrained
-  // prompt, validates and saves `questions`, flips status to "ready".
-  app.post<{ Params: { id: string }; Querystring: { force?: string } }>(
+  // Before generating, show the user what each provider would cost for the
+  // requested number of questions, so they can choose - never picked for
+  // them. Free to call (both providers' token-counting endpoints are free);
+  // doesn't touch document status or spend any generation budget.
+  app.post<{ Params: { id: string }; Body: { count?: number } }>(
+    "/documents/:id/estimate",
+    async (request, reply) => {
+      const { id } = request.params;
+      const count = request.body?.count ?? 8;
+
+      const [doc] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
+      if (!doc) return reply.status(404).send({ error: "Document not found" });
+
+      const [subject] = await db.select().from(subjects).where(eq(subjects.id, doc.subjectId)).limit(1);
+      if (!subject) return reply.status(404).send({ error: "Subject not found" });
+
+      const buffer = await downloadDocument(doc.storagePath);
+      const estimates = await estimateGenerationCosts({
+        fileBase64: buffer.toString("base64"),
+        mimeType: doc.mimeType,
+        subjectName: subject.name,
+        count,
+      });
+
+      return reply.send({ documentId: doc.id, requestedQuestionCount: count, estimates });
+    }
+  );
+
+  // Reads a stored document, calls the chosen AI provider with the
+  // schema-constrained prompt, validates and saves `questions`, flips
+  // status to "ready". The caller picks `provider` and `count` - normally
+  // after looking at /estimate first - rather than the server deciding
+  // silently; both are optional and fall back to the server's AI_PROVIDER
+  // default and 8 questions if omitted (e.g. for scripts/tests).
+  app.post<{ Params: { id: string }; Querystring: { force?: string }; Body?: { provider?: AiProvider; count?: number } }>(
     "/documents/:id/generate",
     async (request, reply) => {
       const { id } = request.params;
       const force = request.query.force === "true";
+      const provider = request.body?.provider;
+      const count = request.body?.count;
 
       const [doc] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
       if (!doc) return reply.status(404).send({ error: "Document not found" });
@@ -81,6 +117,8 @@ export async function documentRoutes(app: FastifyInstance) {
           fileBase64: buffer.toString("base64"),
           mimeType: doc.mimeType,
           subjectName: subject.name,
+          provider,
+          count,
         });
 
         const result = await saveGeneratedQuestions({
@@ -91,7 +129,7 @@ export async function documentRoutes(app: FastifyInstance) {
 
         await db.update(documents).set({ status: "ready" }).where(eq(documents.id, id));
 
-        return reply.send({ status: "ready", questionCount: result.count });
+        return reply.send({ status: "ready", questionCount: result.count, provider: provider ?? "default" });
       } catch (err) {
         app.log.error(err);
         await db

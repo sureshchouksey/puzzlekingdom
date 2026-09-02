@@ -4,3 +4,5 @@ export type GenerateQuestionsParams = {
   subjectName: string;
   count?: number;
 };
+
+export type AiProvider = "claude" | "gemini";

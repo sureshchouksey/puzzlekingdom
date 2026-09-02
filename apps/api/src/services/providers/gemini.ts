@@ -68,3 +68,16 @@ export async function generateQuestionsWithGemini(params: GenerateQuestionsParam
 
   throw lastErr;
 }
+
+// Real input-token count via Gemini's free token-counting endpoint, using
+// the exact same content the real generation call would send.
+export async function countGeminiInputTokens(params: GenerateQuestionsParams): Promise<number> {
+  const result = await getClient().models.countTokens({
+    model: env.GEMINI_MODEL,
+    contents: [
+      { inlineData: { data: params.fileBase64, mimeType: params.mimeType } },
+      { text: buildGenerationPrompt({ subjectName: params.subjectName, count: params.count ?? 8 }) },
+    ],
+  });
+  return result.totalTokens ?? 0;
+}
