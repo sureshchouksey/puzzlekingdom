@@ -28,3 +28,10 @@ apps/api/prisma/migrations/dev.db
 # coverage
 coverage/
 *.tsbuildinfo
+
+# CSSE past-paper source material and MCQ batches derived from it are
+# copyrighted ("may not be photocopied or otherwise reproduced... without
+# permission in writing from CSSE") and must not be published to this
+# public GitHub repo. Kept locally for personal development/practice use
+# only. See plan/MVP1-Content-to-Quiz-Plan.md for the seeding workflow.
+docs/official-papers/
