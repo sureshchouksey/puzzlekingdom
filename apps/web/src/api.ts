@@ -3,8 +3,8 @@ import type {
   AssembleQuizResponse,
   EstimateResponse,
   GenerateResponse,
-  ManualQuestionInput,
   QuizResults,
+  SaveManualQuestionsParams,
   SaveManualQuestionsResponse,
   Subject,
   SubmitQuizResponse,
@@ -79,11 +79,7 @@ export function getResults(attemptId: string): Promise<QuizResults> {
   return fetch(`${BASE}/quizzes/${attemptId}/results`).then((res) => asJson(res));
 }
 
-export function saveManualQuestions(params: {
-  subjectName: string;
-  filename?: string;
-  questions: ManualQuestionInput[];
-}): Promise<SaveManualQuestionsResponse> {
+export function saveManualQuestions(params: SaveManualQuestionsParams): Promise<SaveManualQuestionsResponse> {
   return fetch(`${BASE}/documents/manual`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

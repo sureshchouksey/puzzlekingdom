@@ -18,6 +18,11 @@ export async function createSeedDocument(params: {
   subjectName: string;
   filename: string;
   mimeType: string;
+  // For reading-comprehension content where every question in this
+  // document refers back to one shared story/passage that needs to be
+  // shown to the quiz-taker before its questions (e.g. CSSE English
+  // papers). Omit/undefined for content with no shared passage (e.g. Maths).
+  passage?: string;
 }) {
   const subject = await ensureSubject(params.subjectName);
   const [doc] = await db
@@ -28,6 +33,7 @@ export async function createSeedDocument(params: {
       storagePath: `seed:${params.filename}`,
       mimeType: params.mimeType,
       status: "ready",
+      passage: params.passage,
     })
     .returning();
   return doc;

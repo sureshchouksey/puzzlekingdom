@@ -53,12 +53,13 @@ export async function documentRoutes(app: FastifyInstance) {
   // call at all - the other option alongside AI generation, for content
   // like the CSSE past papers where the real correct answers are already
   // known and don't need to be (re)derived by a model.
-  app.post<{ Body: { subjectName?: string; filename?: string; questions?: unknown } }>(
+  app.post<{ Body: { subjectName?: string; filename?: string; questions?: unknown; passage?: string } }>(
     "/documents/manual",
     async (request, reply) => {
       const subjectName = request.body?.subjectName;
       const filename = request.body?.filename?.trim() || "Manually entered content";
       const rawQuestions = request.body?.questions;
+      const passage = request.body?.passage?.trim() || undefined;
 
       if (!subjectName) return reply.status(400).send({ error: "subjectName is required" });
       if (!rawQuestions) return reply.status(400).send({ error: "questions is required" });
@@ -71,7 +72,7 @@ export async function documentRoutes(app: FastifyInstance) {
         });
       }
 
-      const doc = await createSeedDocument({ subjectName, filename, mimeType: "text/plain" });
+      const doc = await createSeedDocument({ subjectName, filename, mimeType: "text/plain", passage });
       const result = await saveGeneratedQuestions({
         subjectName,
         documentId: doc.id,

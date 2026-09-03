@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { subjects, questions, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
+import { subjects, questions, documents, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
 
 const DEFAULT_QUESTION_COUNT = 10;
 
@@ -19,9 +19,21 @@ export async function quizRoutes(app: FastifyInstance) {
     const [subject] = await db.select().from(subjects).where(eq(subjects.name, subjectName)).limit(1);
     if (!subject) return reply.status(404).send({ error: `No subject named "${subjectName}"` });
 
+    // Joined with documents so each question can carry its source
+    // document's id and (if any) shared reading passage - questions from a
+    // comprehension paper all point back to the same passage, which the
+    // quiz-taker needs to read before answering, not just derived answers
+    // with no source text shown.
     const picked = await db
-      .select()
+      .select({
+        id: questions.id,
+        questionText: questions.questionText,
+        options: questions.options,
+        documentId: questions.documentId,
+        passage: documents.passage,
+      })
       .from(questions)
+      .innerJoin(documents, eq(questions.documentId, documents.id))
       .where(eq(questions.subjectId, subject.id))
       .orderBy(sql`random()`)
       .limit(count);
@@ -46,6 +58,8 @@ export async function quizRoutes(app: FastifyInstance) {
         id: q.id,
         questionText: q.questionText,
         options: q.options,
+        documentId: q.documentId,
+        passage: q.passage,
       })),
     });
   });
@@ -117,7 +131,21 @@ export async function quizRoutes(app: FastifyInstance) {
 
     const questionIds = answerRows.map((a) => a.questionId);
     const realQuestions =
-      questionIds.length > 0 ? await db.select().from(questions).where(inArray(questions.id, questionIds)) : [];
+      questionIds.length > 0
+        ? await db
+            .select({
+              id: questions.id,
+              questionText: questions.questionText,
+              options: questions.options,
+              correctOptionId: questions.correctOptionId,
+              explanation: questions.explanation,
+              documentId: questions.documentId,
+              passage: documents.passage,
+            })
+            .from(questions)
+            .innerJoin(documents, eq(questions.documentId, documents.id))
+            .where(inArray(questions.id, questionIds))
+        : [];
     const byId = new Map(realQuestions.map((q) => [q.id, q]));
 
     return reply.send({
@@ -136,6 +164,8 @@ export async function quizRoutes(app: FastifyInstance) {
           correctOptionId: question?.correctOptionId ?? null,
           explanation: question?.explanation ?? null,
           isCorrect: a.isCorrect,
+          documentId: question?.documentId ?? null,
+          passage: question?.passage ?? null,
         };
       }),
     });

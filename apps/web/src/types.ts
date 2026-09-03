@@ -15,6 +15,11 @@ export type QuizQuestion = {
   id: string;
   questionText: string;
   options: QuizOption[];
+  documentId: string;
+  // The shared reading passage/story this question refers back to, when
+  // it came from a comprehension-style document (e.g. English papers).
+  // Null for self-contained questions with no passage (e.g. Maths).
+  passage: string | null;
 };
 
 export type AssembleQuizResponse = {
@@ -37,6 +42,8 @@ export type ResultsAnswer = {
   correctOptionId: string | null;
   explanation: string | null;
   isCorrect: boolean;
+  documentId: string | null;
+  passage: string | null;
 };
 
 export type QuizResults = {
@@ -87,6 +94,13 @@ export type ManualQuestionInput = {
   options: QuizOption[];
   correctOptionId: string;
   explanation: string;
+};
+
+export type SaveManualQuestionsParams = {
+  subjectName: string;
+  filename?: string;
+  passage?: string;
+  questions: ManualQuestionInput[];
 };
 
 export type SaveManualQuestionsResponse = {

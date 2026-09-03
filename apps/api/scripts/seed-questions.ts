@@ -6,6 +6,13 @@
 //
 // Usage:
 //   npm run seed:questions -- --subject "Maths" --source path/to/content.pdf --questions path/to/generated-questions.json
+//   npm run seed:questions -- --subject "English" --source path/to/paper.pdf --questions path/to/questions.json --passage path/to/passage.txt
+//
+// --passage is optional: a plain text file containing the shared reading
+// passage/story that every question in --questions refers back to (e.g.
+// a CSSE English comprehension paper). Omit it for content with no shared
+// passage, like Maths. When present, the app shows this text to the
+// quiz-taker once, before the questions drawn from this document.
 //
 // --source and --questions are resolved relative to the directory you ran
 // the command FROM (via npm's INIT_CWD), not this script's own folder - so
@@ -47,6 +54,7 @@ async function main() {
   const subject = arg("subject");
   const sourceFile = arg("source");
   const questionsFile = arg("questions");
+  const passageFile = arg("passage");
 
   if (!subject || !sourceFile || !questionsFile) {
     console.error(
@@ -57,10 +65,12 @@ async function main() {
 
   const resolvedQuestionsPath = resolvePath(questionsFile);
   const raw = JSON.parse(readFileSync(resolvedQuestionsPath, "utf-8"));
+  const passage = passageFile ? readFileSync(resolvePath(passageFile), "utf-8").trim() : undefined;
   const doc = await createSeedDocument({
     subjectName: subject,
     filename: basename(sourceFile),
     mimeType: mimeTypeFor(sourceFile),
+    passage,
   });
 
   const result = await saveGeneratedQuestions({

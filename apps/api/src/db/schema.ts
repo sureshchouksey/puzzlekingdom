@@ -19,6 +19,11 @@ export const documents = pgTable("documents", {
   mimeType: text("mime_type").notNull(),
   status: documentStatus("status").notNull().default("uploaded"),
   failureReason: text("failure_reason"),
+  // Shared reading passage/story for documents whose questions all refer
+  // back to one piece of source text (e.g. English comprehension papers).
+  // Null for documents like Maths papers, where each question is
+  // self-contained and there's no passage to show first.
+  passage: text("passage"),
   uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

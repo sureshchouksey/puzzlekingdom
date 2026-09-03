@@ -37,6 +37,7 @@ export function Upload({ onBack }: { onBack: () => void }) {
 
   // Manual-entry path state
   const [drafts, setDrafts] = useState<Draft[]>([emptyDraft()]);
+  const [passage, setPassage] = useState("");
 
   const [error, setError] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
@@ -101,7 +102,11 @@ export function Upload({ onBack }: { onBack: () => void }) {
         correctOptionId: OPTION_LABELS[d.correctIndex],
         explanation: d.explanation.trim(),
       }));
-      const res = await saveManualQuestions({ subjectName: subjectName.trim(), questions });
+      const res = await saveManualQuestions({
+        subjectName: subjectName.trim(),
+        passage: passage.trim() || undefined,
+        questions,
+      });
       setResultMessage(`Saved ${res.questionCount} question(s) to the database - no AI call needed.`);
       setStep("done");
     } catch (err) {
@@ -193,6 +198,21 @@ export function Upload({ onBack }: { onBack: () => void }) {
                 straight to the database with no AI call, so there's no cost and the answers are exactly what
                 you typed.
               </p>
+
+              <label style={{ display: "block", marginBottom: 20 }}>
+                <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>
+                  Reading passage (optional) - for comprehension questions that all refer back to one story,
+                  paste it here and it'll be shown to the quiz-taker before these questions. Leave blank for
+                  self-contained questions (like Maths) that don't need one.
+                </span>
+                <textarea
+                  value={passage}
+                  onChange={(e) => setPassage(e.target.value)}
+                  placeholder="Paste the story or passage here..."
+                  rows={6}
+                  style={{ padding: "8px 12px", fontSize: 14, width: "100%", boxSizing: "border-box", fontFamily: "inherit" }}
+                />
+              </label>
 
               {drafts.map((draft, i) => (
                 <div key={i} style={styles.card}>
