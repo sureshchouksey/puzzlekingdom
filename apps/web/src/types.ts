@@ -71,6 +71,10 @@ export type StageAnswerReview = {
 // stage has been submitted (isComplete: true) - the whole attempt is
 // scored cumulatively at that point, not per stage. `answers` is always
 // this stage's own per-question review, in the order they were submitted.
+// `passed` is false when the stage fell short of `passThreshold` (0.7,
+// i.e. 70%) - in that case none of this stage's answers were recorded,
+// stagesCleared didn't move, and isComplete is always false: the same
+// stage has to be retried before the quiz can continue.
 export type SubmitStageResponse = {
   attemptId: string;
   stagesCleared: number;
@@ -78,6 +82,8 @@ export type SubmitStageResponse = {
   stageScore: number;
   stageTotal: number;
   isComplete: boolean;
+  passed: boolean;
+  passThreshold: number;
   answers: StageAnswerReview[];
   score?: number;
   totalQuestions?: number;

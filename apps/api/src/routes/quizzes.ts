@@ -4,6 +4,10 @@ import { db } from "../db/client.js";
 import { subjects, classes, profiles, questions, documents, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
 
 const DEFAULT_STAGE_SIZE = 10;
+// A stage must score at least this fraction correct to count as
+// cleared - fall short and the player must retry the same stage (see
+// /quizzes/:id/submit below).
+const STAGE_PASS_THRESHOLD = 0.7;
 
 // Tally correct/total per topic tag across a set of answered questions. A
 // question with more than one topic tag (questions.topics is a tag array)
@@ -146,10 +150,19 @@ export async function quizRoutes(app: FastifyInstance) {
   // up where it left off. This is what lets stages_cleared - and so the
   // leaderboard - reflect real progress even if a quiz is never finished.
   //
-  // Idempotent: any questionId already answered for this attempt is
-  // silently skipped rather than double-counted, so a duplicate click (or
-  // a caller that resends every answer in one call, as the old one-shot
-  // API did) can't inflate the score or the stage count.
+  // A stage must score at least STAGE_PASS_THRESHOLD to count as cleared
+  // (the daughter's "every stage should be cutoff 70%" request) - fall
+  // short and the stage's answers are graded but never written to
+  // quiz_attempt_answers, so none of its question ids become "already
+  // answered". That's what lets a failed stage simply be resubmitted as a
+  // retry with no separate retry/attempt-count state to track: from the
+  // database's point of view a failed stage never happened.
+  //
+  // Idempotent on a PASSED stage: any questionId already recorded as
+  // answered for this attempt is silently skipped rather than
+  // double-counted, so a duplicate click (or a caller that resends every
+  // answer in one call, as the old one-shot API did) can't inflate the
+  // score or the stage count.
   app.post<{ Params: { id: string }; Body: { answers?: { questionId: string; selectedOptionId: string }[] } }>(
     "/quizzes/:id/submit",
     async (request, reply) => {
@@ -174,37 +187,102 @@ export async function quizRoutes(app: FastifyInstance) {
 
       const newAnswers = answers.filter((a) => !alreadyAnsweredIds.has(a.questionId));
 
+      // Grade the newly-submitted answers in memory first - nothing is
+      // written to the database yet, since whether they get persisted at
+      // all depends on the pass/fail check below.
+      const newGraded: {
+        questionId: string;
+        selectedOptionId: string;
+        isCorrect: boolean;
+        questionText: string;
+        options: unknown;
+        correctOptionId: string;
+        explanation: string;
+        tip: string | null;
+      }[] = [];
+
       if (newAnswers.length > 0) {
         const questionIds = newAnswers.map((a) => a.questionId);
         const realQuestions = await db.select().from(questions).where(inArray(questions.id, questionIds));
         const byId = new Map(realQuestions.map((q) => [q.id, q]));
 
-        const rows = newAnswers.map((a) => {
+        for (const a of newAnswers) {
           const question = byId.get(a.questionId);
-          return {
-            attemptId: id,
+          if (!question) continue;
+          const isCorrect = question.correctOptionId === a.selectedOptionId;
+          newGraded.push({
             questionId: a.questionId,
             selectedOptionId: a.selectedOptionId,
-            isCorrect: question ? question.correctOptionId === a.selectedOptionId : false,
-          };
+            isCorrect,
+            questionText: question.questionText,
+            options: question.options,
+            correctOptionId: question.correctOptionId,
+            explanation: question.explanation,
+            tip: !isCorrect ? question.tip : null,
+          });
+        }
+      }
+
+      const newCorrect = newGraded.filter((g) => g.isCorrect).length;
+      // A resubmission where every id was already recorded (nothing new to
+      // grade) isn't a fresh attempt at the stage - treat it as passing so
+      // it falls through to the normal "already cleared" response below,
+      // same as before this cutoff existed.
+      const stagePassed = newAnswers.length === 0 ? true : newCorrect / newAnswers.length >= STAGE_PASS_THRESHOLD;
+
+      if (newGraded.length > 0 && stagePassed) {
+        await db.insert(quizAttemptAnswers).values(
+          newGraded.map((g) => ({
+            attemptId: id,
+            questionId: g.questionId,
+            selectedOptionId: g.selectedOptionId,
+            isCorrect: g.isCorrect,
+          }))
+        );
+      }
+
+      const totalStages = Math.ceil(attempt.totalQuestions / attempt.stageSize);
+
+      if (!stagePassed) {
+        // Below the cutoff - none of this stage's answers were persisted,
+        // so stagesCleared/totalAnswered stay exactly where they were.
+        // The review is built straight from the in-memory grading above,
+        // in submission order, since there's nothing in the database yet
+        // to read it back from.
+        const gradedById = new Map(newGraded.map((g) => [g.questionId, g]));
+        const stageAnswers = answers.flatMap((a) => {
+          const g = gradedById.get(a.questionId);
+          if (!g) return [];
+          return [
+            {
+              questionId: g.questionId,
+              questionText: g.questionText,
+              options: g.options,
+              selectedOptionId: g.selectedOptionId,
+              correctOptionId: g.correctOptionId,
+              explanation: g.explanation,
+              tip: g.tip,
+              isCorrect: g.isCorrect,
+            },
+          ];
         });
 
-        await db.insert(quizAttemptAnswers).values(rows);
+        return reply.send({
+          attemptId: id,
+          stagesCleared: attempt.stagesCleared,
+          totalStages,
+          stageScore: newCorrect,
+          stageTotal: newAnswers.length,
+          isComplete: false,
+          passed: false,
+          passThreshold: STAGE_PASS_THRESHOLD,
+          answers: stageAnswers,
+        });
       }
 
       const totalAnswered = alreadyAnsweredIds.size + newAnswers.length;
-      const totalStages = Math.ceil(attempt.totalQuestions / attempt.stageSize);
       const stagesCleared = Math.min(Math.floor(totalAnswered / attempt.stageSize), totalStages);
       const isComplete = totalAnswered >= attempt.totalQuestions;
-
-      // How many of the just-submitted answers were correct, for the
-      // stage-cleared interstitial - purely informational about this call,
-      // not the overall score.
-      const stageScore = await db
-        .select({ isCorrect: quizAttemptAnswers.isCorrect })
-        .from(quizAttemptAnswers)
-        .where(and(eq(quizAttemptAnswers.attemptId, id), inArray(quizAttemptAnswers.questionId, answers.map((a) => a.questionId))));
-      const stageCorrect = stageScore.filter((s) => s.isCorrect).length;
 
       // Full per-question review for just this stage's answers - what was
       // picked, what was actually correct, the explanation, and (for a
@@ -226,6 +304,7 @@ export async function quizRoutes(app: FastifyInstance) {
         .innerJoin(questions, eq(quizAttemptAnswers.questionId, questions.id))
         .where(and(eq(quizAttemptAnswers.attemptId, id), inArray(quizAttemptAnswers.questionId, answers.map((a) => a.questionId))));
       const stageAnswerById = new Map(stageAnswerRows.map((r) => [r.questionId, r]));
+      const stageCorrect = stageAnswerRows.filter((r) => r.isCorrect).length;
       // Reordered to match the order this stage's answers were submitted
       // in (the same order the player saw them), not whatever order the
       // DB happened to return.
@@ -255,6 +334,8 @@ export async function quizRoutes(app: FastifyInstance) {
           stageScore: stageCorrect,
           stageTotal: answers.length,
           isComplete: false,
+          passed: true,
+          passThreshold: STAGE_PASS_THRESHOLD,
           answers: stageAnswers,
         });
       }
@@ -287,6 +368,8 @@ export async function quizRoutes(app: FastifyInstance) {
         stageScore: stageCorrect,
         stageTotal: answers.length,
         isComplete: true,
+        passed: true,
+        passThreshold: STAGE_PASS_THRESHOLD,
         answers: stageAnswers,
         score,
         totalQuestions: attempt.totalQuestions,

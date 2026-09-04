@@ -11,6 +11,7 @@
 // admin session seeing anyone's via ?profileId= or everyone's combined,
 // and an admin's "reset PIN" recovery action.
 
+import { inArray } from "drizzle-orm";
 import Fastify from "fastify";
 import bcrypt from "bcryptjs";
 import { registerAuth } from "../src/auth.js";
@@ -19,7 +20,7 @@ import { quizRoutes } from "../src/routes/quizzes.js";
 import { reportRoutes } from "../src/routes/reports.js";
 import { adminRoutes } from "../src/routes/admin.js";
 import { db } from "../src/db/client.js";
-import { admins } from "../src/db/schema.js";
+import { admins, questions } from "../src/db/schema.js";
 
 type AttemptReport = { id: string };
 
@@ -77,10 +78,19 @@ async function main() {
     throw new Error(`Assemble failed (${assembleRes.statusCode}): ${assembleRes.body} - does subject "Maths" have questions seeded?`);
   }
   const assembled = assembleRes.json() as { attemptId: string; questions: { id: string; options: { id: string }[] }[] };
+  // Answer for real (not just "first option") - since a stage now needs
+  // 70%+ to be accepted at all (see quizzes.ts's STAGE_PASS_THRESHOLD),
+  // picking blindly would fail this single-stage quiz most of the time.
+  const questionIds = assembled.questions.map((q) => q.id);
+  const correctRows = await db
+    .select({ id: questions.id, correctOptionId: questions.correctOptionId })
+    .from(questions)
+    .where(inArray(questions.id, questionIds));
+  const correctOptionById = new Map(correctRows.map((r) => [r.id, r.correctOptionId]));
   const submitRes = await app.inject({
     method: "POST",
     url: `/quizzes/${assembled.attemptId}/submit`,
-    payload: { answers: assembled.questions.map((q) => ({ questionId: q.id, selectedOptionId: q.options[0].id })) },
+    payload: { answers: assembled.questions.map((q) => ({ questionId: q.id, selectedOptionId: correctOptionById.get(q.id)! })) },
   });
   if (submitRes.statusCode !== 200 || !(submitRes.json() as { isComplete: boolean }).isComplete) {
     throw new Error(`Submit failed to complete the attempt (${submitRes.statusCode}): ${submitRes.body}`);

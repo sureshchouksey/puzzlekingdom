@@ -77,18 +77,44 @@ export function Quiz({
     setCurrentStageIndex((i) => i + 1);
   }
 
+  // Below the pass cutoff - the backend never recorded this stage's
+  // answers, so the same stage can simply be retaken: clear this stage's
+  // picks and drop back to the question screen at the same stage index.
+  function retryStage() {
+    setStageResult(null);
+    setSelections((prev) => {
+      const next = { ...prev };
+      for (const q of currentStage) delete next[q.id];
+      return next;
+    });
+  }
+
   if (stageResult) {
     const stagesToGo = stageResult.totalStages - stageResult.stagesCleared;
+    const stagePercent = stageResult.stageTotal > 0 ? Math.round((stageResult.stageScore / stageResult.stageTotal) * 100) : 0;
+    const cutoffPercent = Math.round(stageResult.passThreshold * 100);
     let reviewNumber = 0;
     return (
       <Layout title={`${quiz.subjectName} quiz`}>
-        <div style={{ ...styles.card, textAlign: "center", padding: 24 }}>
+        <div
+          style={{
+            ...styles.card,
+            textAlign: "center",
+            padding: 24,
+            borderColor: stageResult.passed ? undefined : "#eb6834",
+            background: stageResult.passed ? undefined : "#fdf3ef",
+          }}
+        >
           <p style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
-            🎉 Stage {stageResult.stagesCleared} cleared!
+            {stageResult.passed ? `🎉 Stage ${stageResult.stagesCleared} cleared!` : "Not quite — give this stage another go"}
           </p>
           <p style={styles.muted}>
-            {stageResult.stageScore} / {stageResult.stageTotal} correct this stage
-            {stagesToGo > 0 ? ` — ${stagesToGo} stage${stagesToGo === 1 ? "" : "s"} to go` : ""}
+            {stageResult.stageScore} / {stageResult.stageTotal} correct this stage ({stagePercent}%)
+            {stageResult.passed
+              ? stagesToGo > 0
+                ? ` — ${stagesToGo} stage${stagesToGo === 1 ? "" : "s"} to go`
+                : ""
+              : ` — you need at least ${cutoffPercent}% to clear a stage`}
           </p>
         </div>
 
@@ -136,9 +162,15 @@ export function Quiz({
           );
         })}
 
-        <button style={styles.primaryButton} onClick={continueToNextStage}>
-          Continue to stage {stageResult.stagesCleared + 1}
-        </button>
+        {stageResult.passed ? (
+          <button style={styles.primaryButton} onClick={continueToNextStage}>
+            Continue to stage {stageResult.stagesCleared + 1}
+          </button>
+        ) : (
+          <button style={styles.primaryButton} onClick={retryStage}>
+            Retry this stage
+          </button>
+        )}
       </Layout>
     );
   }
