@@ -72,7 +72,7 @@ export function Reports({ onBack }: { onBack: () => void }) {
   }, [selectedClassId, selectedSubjectName]);
 
   return (
-    <Layout title="Progress reports" onBack={onBack}>
+    <Layout title="My progress reports" onBack={onBack}>
       {classes && classes.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <span style={{ ...styles.muted, display: "block", marginBottom: 8 }}>Class</span>

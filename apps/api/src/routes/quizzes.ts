@@ -25,6 +25,22 @@ function buildTopicBreakdown(
   return breakdown;
 }
 
+// Fisher-Yates - a fresh random order every call. Used to shuffle each
+// question's options at serve time (below): the correct answer's POSITION
+// in the array is never touched at rest in the database, only how it's
+// laid out for this one quiz. Matching an answer's correctness is always
+// by option `id`, never by array position, so this is purely cosmetic and
+// can't affect scoring - it just stops "the answer is always the 2nd
+// option" from being something a quiz-taker can memorize across retakes.
+function shuffled<T>(items: T[]): T[] {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 export async function quizRoutes(app: FastifyInstance) {
   // Assemble a quiz: by default, pull in EVERY question already saved for
   // this subject (optionally narrowed to one class and/or one topic) - not
@@ -114,7 +130,7 @@ export async function quizRoutes(app: FastifyInstance) {
       questions: picked.map((q) => ({
         id: q.id,
         questionText: q.questionText,
-        options: q.options,
+        options: shuffled(q.options),
         documentId: q.documentId,
         passage: q.passage,
         topics: q.topics,
@@ -190,6 +206,46 @@ export async function quizRoutes(app: FastifyInstance) {
         .where(and(eq(quizAttemptAnswers.attemptId, id), inArray(quizAttemptAnswers.questionId, answers.map((a) => a.questionId))));
       const stageCorrect = stageScore.filter((s) => s.isCorrect).length;
 
+      // Full per-question review for just this stage's answers - what was
+      // picked, what was actually correct, the explanation, and (for a
+      // wrong answer) the memorable tip - so the stage-cleared screen can
+      // show a real report instead of only a score, before the player
+      // continues to the next stage.
+      const stageAnswerRows = await db
+        .select({
+          questionId: quizAttemptAnswers.questionId,
+          selectedOptionId: quizAttemptAnswers.selectedOptionId,
+          isCorrect: quizAttemptAnswers.isCorrect,
+          questionText: questions.questionText,
+          options: questions.options,
+          correctOptionId: questions.correctOptionId,
+          explanation: questions.explanation,
+          tip: questions.tip,
+        })
+        .from(quizAttemptAnswers)
+        .innerJoin(questions, eq(quizAttemptAnswers.questionId, questions.id))
+        .where(and(eq(quizAttemptAnswers.attemptId, id), inArray(quizAttemptAnswers.questionId, answers.map((a) => a.questionId))));
+      const stageAnswerById = new Map(stageAnswerRows.map((r) => [r.questionId, r]));
+      // Reordered to match the order this stage's answers were submitted
+      // in (the same order the player saw them), not whatever order the
+      // DB happened to return.
+      const stageAnswers = answers.flatMap((a) => {
+        const r = stageAnswerById.get(a.questionId);
+        if (!r) return [];
+        return [
+          {
+            questionId: r.questionId,
+            questionText: r.questionText,
+            options: r.options,
+            selectedOptionId: r.selectedOptionId,
+            correctOptionId: r.correctOptionId,
+            explanation: r.explanation,
+            tip: !r.isCorrect ? r.tip : null,
+            isCorrect: r.isCorrect,
+          },
+        ];
+      });
+
       if (!isComplete) {
         await db.update(quizAttempts).set({ stagesCleared }).where(eq(quizAttempts.id, id));
         return reply.send({
@@ -199,6 +255,7 @@ export async function quizRoutes(app: FastifyInstance) {
           stageScore: stageCorrect,
           stageTotal: answers.length,
           isComplete: false,
+          answers: stageAnswers,
         });
       }
 
@@ -230,6 +287,7 @@ export async function quizRoutes(app: FastifyInstance) {
         stageScore: stageCorrect,
         stageTotal: answers.length,
         isComplete: true,
+        answers: stageAnswers,
         score,
         totalQuestions: attempt.totalQuestions,
         topicBreakdown,

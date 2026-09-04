@@ -5,10 +5,11 @@ import { ClassPicker } from "./screens/ClassPicker";
 import { SubjectPicker } from "./screens/SubjectPicker";
 import { Quiz } from "./screens/Quiz";
 import { Results } from "./screens/Results";
-import { Upload } from "./screens/Upload";
 import { Reports } from "./screens/Reports";
 import { Leaderboard } from "./screens/Leaderboard";
-import type { AssembleQuizResponse, PkClass, Profile } from "./types";
+import { AdminLogin } from "./screens/AdminLogin";
+import { AdminDashboard } from "./screens/AdminDashboard";
+import type { AdminUser, AssembleQuizResponse, PkClass, Profile } from "./types";
 
 type Screen =
   | { name: "welcome" }
@@ -17,12 +18,14 @@ type Screen =
   | { name: "subjectPicker"; pkClass: PkClass }
   | { name: "quiz"; quiz: AssembleQuizResponse }
   | { name: "results"; attemptId: string }
-  | { name: "upload" }
   | { name: "reports" }
-  | { name: "leaderboard" };
+  | { name: "leaderboard" }
+  | { name: "adminLogin" }
+  | { name: "adminDashboard" };
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [admin, setAdmin] = useState<AdminUser | null>(null);
   const [screen, setScreen] = useState<Screen>({ name: "welcome" });
   // Remembers the last class picked, so "play again" from Results can jump
   // straight back to that class's subject picker instead of starting the
@@ -37,6 +40,7 @@ export default function App() {
             setProfile(enteredProfile);
             setScreen({ name: "home" });
           }}
+          onAdminLogin={() => setScreen({ name: "adminLogin" })}
         />
       );
     case "home":
@@ -44,7 +48,6 @@ export default function App() {
         <Home
           name={profile?.name ?? null}
           onPlay={() => setScreen({ name: "classPicker" })}
-          onAddContent={() => setScreen({ name: "upload" })}
           onViewReports={() => setScreen({ name: "reports" })}
           onViewLeaderboard={() => setScreen({ name: "leaderboard" })}
         />
@@ -92,11 +95,36 @@ export default function App() {
           }
         />
       );
-    case "upload":
-      return <Upload onBack={() => setScreen({ name: "home" })} />;
     case "reports":
       return <Reports onBack={() => setScreen({ name: "home" })} />;
     case "leaderboard":
       return <Leaderboard onBack={() => setScreen({ name: "home" })} />;
+    case "adminLogin":
+      return (
+        <AdminLogin
+          onBack={() => setScreen({ name: "welcome" })}
+          onLoggedIn={(loggedInAdmin) => {
+            setAdmin(loggedInAdmin);
+            setScreen({ name: "adminDashboard" });
+          }}
+        />
+      );
+    case "adminDashboard":
+      if (!admin) {
+        return (
+          <main style={{ maxWidth: 640, margin: "60px auto", padding: "0 24px" }}>
+            <p style={{ color: "#5a5148" }}>Something went wrong - please log in again.</p>
+          </main>
+        );
+      }
+      return (
+        <AdminDashboard
+          admin={admin}
+          onLogOut={() => {
+            setAdmin(null);
+            setScreen({ name: "welcome" });
+          }}
+        />
+      );
   }
 }

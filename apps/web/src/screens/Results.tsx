@@ -109,6 +109,11 @@ export function Results({ attemptId, onPlayAgain }: { attemptId: string; onPlayA
                   })}
                 </div>
                 {a.explanation && <p style={{ ...styles.muted, fontStyle: "italic" }}>{a.explanation}</p>}
+                {a.tip && (
+                  <p style={{ fontSize: 13, marginTop: 8, color: "#8a4b12" }}>
+                    💡 <strong>Tip:</strong> {a.tip}
+                  </p>
+                )}
               </div>
             );
           })}

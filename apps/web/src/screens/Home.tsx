@@ -3,13 +3,11 @@ import { Layout, styles } from "./Layout";
 export function Home({
   name,
   onPlay,
-  onAddContent,
   onViewReports,
   onViewLeaderboard,
 }: {
   name: string | null;
   onPlay: () => void;
-  onAddContent: () => void;
   onViewReports: () => void;
   onViewLeaderboard: () => void;
 }) {
@@ -24,10 +22,7 @@ export function Home({
           Leaderboard
         </button>
         <button style={styles.secondaryButton} onClick={onViewReports}>
-          Progress reports
-        </button>
-        <button style={styles.secondaryButton} onClick={onAddContent}>
-          Add new content (parent)
+          My progress reports
         </button>
       </div>
     </Layout>

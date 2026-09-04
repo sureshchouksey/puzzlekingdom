@@ -1,4 +1,9 @@
 import type {
+  AdminLoginResponse,
+  AdminQuestion,
+  AdminQuestionsResponse,
+  AdminQuestionWriteInput,
+  AdminUserSummary,
   AiProvider,
   AssembleQuizResponse,
   AttemptReport,
@@ -6,7 +11,8 @@ import type {
   GenerateResponse,
   LeaderboardEntry,
   PkClass,
-  Profile,
+  ProfileLookupResponse,
+  ProfileSessionResponse,
   QuizResults,
   SaveManualQuestionsParams,
   SaveManualQuestionsResponse,
@@ -39,10 +45,42 @@ function getStoredPasscode(): string | null {
   }
 }
 
+// One stored session token, whichever flow (profile session or admin
+// login) last succeeded - see apps/api/src/auth.ts. Cleared on logout().
+const AUTH_TOKEN_STORAGE_KEY = "pk_auth_token";
+
+export function getAuthToken(): string | null {
+  try {
+    return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setAuthToken(token: string): void {
+  try {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // ignore - session just won't persist across a reload
+  }
+}
+
+// Clears the stored session token - "log out" for either a profile or an
+// admin. Doesn't touch the shared passcode, which stays entered.
+export function logout(): void {
+  try {
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const passcode = getStoredPasscode();
+  const token = getAuthToken();
   const headers = new Headers(init.headers);
   if (passcode) headers.set("x-app-passcode", passcode);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   return fetch(`${BASE}${path}`, { ...init, headers });
 }
 
@@ -65,19 +103,49 @@ export function getSubjects(): Promise<Subject[]> {
   return apiFetch(`/subjects`).then((res) => asJson(res));
 }
 
-export function getProfiles(): Promise<Profile[]> {
-  return apiFetch(`/profiles`).then((res) => asJson(res));
-}
-
 // Find-or-create by name (case-insensitive on the server) - safe to call
 // every time someone "enters the kingdom" with a name, whether they're new
-// or returning.
-export function createOrGetProfile(params: { name: string; title?: string }): Promise<Profile> {
+// or returning. Never issues a session by itself - see setProfilePin /
+// verifyProfilePin below, which is what the Welcome screen calls next
+// depending on this response's `hasPin`.
+export function lookupProfile(name: string): Promise<ProfileLookupResponse> {
   return apiFetch(`/profiles`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify({ name }),
   }).then((res) => asJson(res));
+}
+
+// One-time PIN bootstrap for a profile that doesn't have one yet (brand
+// new, or created before PINs existed). `title` is only meaningful the
+// very first time (a genuinely new profile) - the server ignores it if
+// the profile already has a title. Stores the returned token itself.
+export function setProfilePin(profileId: string, params: { pin: string; title?: string }): Promise<ProfileSessionResponse> {
+  return apiFetch(`/profiles/${profileId}/set-pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  })
+    .then((res) => asJson<ProfileSessionResponse>(res))
+    .then((data) => {
+      setAuthToken(data.token);
+      return data;
+    });
+}
+
+// Normal login for a profile that already has a PIN. Stores the returned
+// token itself.
+export function verifyProfilePin(profileId: string, pin: string): Promise<ProfileSessionResponse> {
+  return apiFetch(`/profiles/${profileId}/verify-pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin }),
+  })
+    .then((res) => asJson<ProfileSessionResponse>(res))
+    .then((data) => {
+      setAuthToken(data.token);
+      return data;
+    });
 }
 
 export function getClasses(): Promise<PkClass[]> {
@@ -183,4 +251,65 @@ export function getTopicReports(params: { classId?: string; subjectName?: string
 
 export function getLeaderboard(params: { classId?: string } = {}): Promise<LeaderboardEntry[]> {
   return apiFetch(`/leaderboard${buildQuery(params)}`).then((res) => asJson(res));
+}
+
+// Real admin login - username + password, unlike the passwordless
+// profiles. Stores the returned token itself, so callers don't need to.
+export function adminLogin(params: { username: string; password: string }): Promise<AdminLoginResponse> {
+  return apiFetch(`/admin/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  })
+    .then((res) => asJson<AdminLoginResponse>(res))
+    .then((data) => {
+      setAuthToken(data.token);
+      return data;
+    });
+}
+
+export function getAdminQuestions(
+  params: { subjectName?: string; classId?: string; search?: string; limit?: number; cursor?: string } = {}
+): Promise<AdminQuestionsResponse> {
+  return apiFetch(`/admin/questions${buildQuery(params)}`).then((res) => asJson(res));
+}
+
+export function createAdminQuestion(input: AdminQuestionWriteInput): Promise<AdminQuestion> {
+  return apiFetch(`/admin/questions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }).then((res) => asJson(res));
+}
+
+export function updateAdminQuestion(id: string, input: AdminQuestionWriteInput): Promise<AdminQuestion> {
+  return apiFetch(`/admin/questions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }).then((res) => asJson(res));
+}
+
+export async function deleteAdminQuestion(id: string): Promise<void> {
+  const res = await apiFetch(`/admin/questions/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const message = typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : res.statusText;
+    throw new Error(message);
+  }
+}
+
+export function getAdminUsers(): Promise<AdminUserSummary[]> {
+  return apiFetch(`/admin/users`).then((res) => asJson(res));
+}
+
+// Forgot-PIN recovery - clears a profile's PIN so it's prompted to choose
+// a new one next time it's entered on the Welcome screen.
+export async function resetProfilePin(profileId: string): Promise<void> {
+  const res = await apiFetch(`/admin/users/${profileId}/reset-pin`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const message = typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : res.statusText;
+    throw new Error(message);
+  }
 }

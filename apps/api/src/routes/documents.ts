@@ -9,10 +9,15 @@ import { generatedQuestionSetSchema } from "../lib/question-schema.js";
 import { generateQuestionsFromDocument } from "../services/generate-questions.js";
 import { estimateGenerationCosts } from "../lib/ai-pricing.js";
 import type { AiProvider } from "../services/providers/types.js";
+import { requireAdmin } from "../auth.js";
 
 const ALLOWED_MIME = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp"]);
 
 export async function documentRoutes(app: FastifyInstance) {
+  // Content management is admin-only - every route in this file changes
+  // what questions exist, so all of them require an admin session.
+  app.addHook("preHandler", requireAdmin);
+
   // Upload a PDF/image, tagged with a subject. Stores the file in Supabase
   // Storage and creates a `documents` row with status "uploaded".
   app.post("/documents", async (request, reply) => {

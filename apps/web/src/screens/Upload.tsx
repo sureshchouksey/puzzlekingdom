@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { estimateGeneration, generateQuestions, saveManualQuestions, uploadDocument } from "../api";
 import type { AiProvider, ManualQuestionInput, ProviderCostEstimate } from "../types";
-import { Layout, styles } from "./Layout";
+import { styles } from "./Layout";
 
 type Mode = "ai" | "manual";
 type Step = "form" | "uploading" | "estimating" | "choosing" | "generating" | "done" | "error";
@@ -23,7 +23,11 @@ function draftIsComplete(d: Draft): boolean {
   return d.questionText.trim().length > 0 && d.options.every((o) => o.trim().length > 0) && d.explanation.trim().length > 0;
 }
 
-export function Upload({ onBack }: { onBack: () => void }) {
+// A tab inside the admin dashboard (not a standalone screen anymore -
+// content management is admin-only, see AdminDashboard.tsx). onDone fires
+// when the "Done" button is clicked after a successful save, so the
+// dashboard can refresh its question list to reflect what was just added.
+export function Upload({ onDone }: { onDone?: () => void }) {
   const [mode, setMode] = useState<Mode>("ai");
   const [subjectName, setSubjectName] = useState("");
 
@@ -118,7 +122,7 @@ export function Upload({ onBack }: { onBack: () => void }) {
   const allManualComplete = drafts.length > 0 && drafts.every(draftIsComplete);
 
   return (
-    <Layout title="Add new content" onBack={onBack}>
+    <div>
       {step === "form" && (
         <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
           <button
@@ -336,13 +340,24 @@ export function Upload({ onBack }: { onBack: () => void }) {
       {step === "done" && (
         <>
           <p style={{ color: "#0f6b45", fontWeight: 600, marginBottom: 16 }}>{resultMessage}</p>
-          <button style={styles.secondaryButton} onClick={onBack}>
-            Done
+          <button
+            style={styles.secondaryButton}
+            onClick={() => {
+              setStep("form");
+              setResultMessage(null);
+              setFile(null);
+              setDocumentId(null);
+              setDrafts([emptyDraft()]);
+              setPassage("");
+              onDone?.();
+            }}
+          >
+            Done - add more
           </button>
         </>
       )}
 
       {error && <p style={styles.error}>{error}</p>}
-    </Layout>
+    </div>
   );
 }

@@ -50,10 +50,27 @@ export type AssembleQuizResponse = {
   questions: QuizQuestion[];
 };
 
+// Per-question review for one stage's worth of answers - what was picked,
+// what was actually correct, the explanation, and (only when wrong) the
+// memorable tip. Same shape the final Results screen uses (ResultsAnswer
+// below), just without the passage/document fields since the stage report
+// doesn't re-show the passage.
+export type StageAnswerReview = {
+  questionId: string;
+  questionText: string;
+  options: QuizOption[];
+  selectedOptionId: string;
+  correctOptionId: string;
+  explanation: string;
+  tip: string | null;
+  isCorrect: boolean;
+};
+
 // Response from submitting one stage's worth of answers. `score` /
 // `totalQuestions` / `topicBreakdown` are only present once the final
 // stage has been submitted (isComplete: true) - the whole attempt is
-// scored cumulatively at that point, not per stage.
+// scored cumulatively at that point, not per stage. `answers` is always
+// this stage's own per-question review, in the order they were submitted.
 export type SubmitStageResponse = {
   attemptId: string;
   stagesCleared: number;
@@ -61,6 +78,7 @@ export type SubmitStageResponse = {
   stageScore: number;
   stageTotal: number;
   isComplete: boolean;
+  answers: StageAnswerReview[];
   score?: number;
   totalQuestions?: number;
   topicBreakdown?: Record<string, { correct: number; total: number }>;
@@ -73,6 +91,9 @@ export type ResultsAnswer = {
   selectedOptionId: string;
   correctOptionId: string | null;
   explanation: string | null;
+  // The memorable trick/strategy for this question - only populated for a
+  // wrong answer (see apps/api/src/routes/quizzes.ts's /results handler).
+  tip: string | null;
   isCorrect: boolean;
   documentId: string | null;
   passage: string | null;
@@ -181,4 +202,84 @@ export type LeaderboardEntry = {
   questionsAnswered: number;
   questionsCorrect: number;
   accuracy: number | null;
+};
+
+// Returned alongside a Profile once a session is actually issued (after
+// the PIN step succeeds) - the token proves "you are this profile" on
+// every later request. See apps/api/src/auth.ts.
+export type ProfileSessionResponse = {
+  profile: Profile;
+  token: string;
+};
+
+// Returned by find-or-create (POST /profiles) - no session yet, just
+// enough for the Welcome screen to decide which PIN step to show next:
+// "created" means this name didn't exist before this call, "hasPin" says
+// whether set-pin or verify-pin is the right next step.
+export type ProfileLookupResponse = Profile & {
+  created: boolean;
+  hasPin: boolean;
+};
+
+// A real administrator account - username + password, stored in the
+// database, distinct from the passwordless player profiles above.
+export type AdminUser = {
+  id: string;
+  username: string;
+};
+
+export type AdminLoginResponse = {
+  admin: AdminUser;
+  token: string;
+};
+
+// One question row as shown in the admin dashboard's question list -
+// AdminQuestion carries the same fields plus subject/class context and
+// timestamps, since it's read from a joined query.
+export type AdminQuestion = {
+  id: string;
+  questionText: string;
+  options: QuizOption[];
+  correctOptionId: string;
+  explanation: string;
+  topics: string[] | null;
+  tip: string | null;
+  documentId: string;
+  subjectName: string;
+  className: string | null;
+  createdAt: string;
+};
+
+export type AdminQuestionsResponse = {
+  questions: AdminQuestion[];
+  nextCursor: string | null;
+};
+
+// Body for creating or editing a question from the admin dashboard - every
+// field optional except documentId (required only when creating), since an
+// edit only sends the fields that changed.
+export type AdminQuestionWriteInput = {
+  documentId?: string;
+  questionText?: string;
+  options?: QuizOption[];
+  correctOptionId?: string;
+  explanation?: string;
+  topics?: string[];
+  tip?: string;
+};
+
+// One row of the admin "Users" roster - every profile with aggregate
+// stats, not just the ones who've played (unlike the public leaderboard).
+export type AdminUserSummary = {
+  profileId: string;
+  name: string;
+  title: string | null;
+  createdAt: string;
+  hasPin: boolean;
+  quizzesPlayed: number;
+  stagesCleared: number;
+  questionsAnswered: number;
+  questionsCorrect: number;
+  accuracy: number | null;
+  lastActive: string | null;
 };

@@ -2,18 +2,36 @@
 // call at all) via Fastify's in-process .inject() - still needs real
 // internet for the DB writes, so run from your own Terminal:
 //   npm run test:manual -w apps/api
+//
+// /documents/manual is admin-only (see routes/documents.ts), so this logs
+// in as a disposable test admin account first (upserted directly, same as
+// scripts/create-admin.ts) and sends its token on every request.
 
 import Fastify from "fastify";
+import bcrypt from "bcryptjs";
+import { registerAuth } from "../src/auth.js";
 import { documentRoutes } from "../src/routes/documents.js";
+import { db } from "../src/db/client.js";
+import { admins } from "../src/db/schema.js";
 
 async function main() {
   const app = Fastify();
+  await registerAuth(app);
   await app.register(documentRoutes);
+
+  const testUsername = "test-manual-seed-admin";
+  await db
+    .insert(admins)
+    .values({ username: testUsername, passwordHash: await bcrypt.hash("test-only-password", 4) })
+    .onConflictDoUpdate({ target: admins.username, set: { passwordHash: await bcrypt.hash("test-only-password", 4) } });
+  const adminToken = await app.jwt.sign({ kind: "admin", adminId: "test", username: testUsername });
+  const authHeaders = { authorization: `Bearer ${adminToken}` };
 
   console.log("1/2  Saving 2 hand-entered questions with no AI call...");
   const goodRes = await app.inject({
     method: "POST",
     url: "/documents/manual",
+    headers: authHeaders,
     payload: {
       subjectName: "Maths",
       filename: "Manual test batch",
@@ -50,6 +68,7 @@ async function main() {
   const badRes = await app.inject({
     method: "POST",
     url: "/documents/manual",
+    headers: authHeaders,
     payload: {
       subjectName: "Maths",
       questions: [

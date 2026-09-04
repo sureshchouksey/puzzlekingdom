@@ -19,6 +19,10 @@ const envSchema = z
     // LAN-only access) disables the gate entirely, so nothing changes for
     // development.
     APP_PASSCODE: z.string().optional(),
+    // Signs profile/admin session JWTs. Required (unlike APP_PASSCODE) -
+    // real per-user sessions need a real secret even in local dev, since
+    // reports privacy depends on it.
+    JWT_SECRET: z.string().min(1, "JWT_SECRET is required"),
   })
   .superRefine((data, ctx) => {
     if (data.AI_PROVIDER === "claude" && !data.ANTHROPIC_API_KEY) {

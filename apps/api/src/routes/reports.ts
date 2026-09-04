@@ -2,19 +2,23 @@ import type { FastifyInstance } from "fastify";
 import { eq, and, desc, isNotNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { subjects, classes, quizAttempts } from "../db/schema.js";
+import { requireIdentity } from "../auth.js";
 
 const DEFAULT_HISTORY_LIMIT = 20;
 
 // Progress reports, built on top of the topic-progress snapshot each quiz
 // attempt saves at submit time (see buildTopicBreakdown in routes/quizzes.ts).
-// There are no parent/child accounts yet (MVP1 is a single shared space),
-// so "reports" here means the shared history of every quiz anyone's taken,
-// filterable by class/subject - not a per-child view. That's the natural
-// next step once accounts exist, not a redesign of this data.
+// Private by default: a logged-in profile only ever sees its own history,
+// no matter what it asks for - the leaderboard (routes/leaderboard.ts) is
+// the public, everyone-visible view. An admin session can inspect any one
+// profile's reports via ?profileId=, or omit it to see the combined
+// history across everyone, as a whole-family overview.
 export async function reportRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", requireIdentity);
+
   // History: every completed quiz attempt (most recent first), each with
   // its own saved topic breakdown - a "report" per quiz taken.
-  app.get<{ Querystring: { subjectName?: string; classId?: string; limit?: string } }>(
+  app.get<{ Querystring: { subjectName?: string; classId?: string; limit?: string; profileId?: string } }>(
     "/reports",
     async (request, reply) => {
       const { subjectName, classId } = request.query;
@@ -27,9 +31,16 @@ export async function reportRoutes(app: FastifyInstance) {
         subjectId = subject.id;
       }
 
+      // A profile session can never see anyone else's history, regardless
+      // of what's in the query string - only an admin session's own
+      // ?profileId= override is honored.
+      const identity = request.identity!;
+      const profileId = identity.kind === "profile" ? identity.profileId : request.query.profileId;
+
       const conditions = [isNotNull(quizAttempts.completedAt)];
       if (subjectId) conditions.push(eq(quizAttempts.subjectId, subjectId));
       if (classId) conditions.push(eq(quizAttempts.classId, classId));
+      if (profileId) conditions.push(eq(quizAttempts.profileId, profileId));
 
       const rows = await db
         .select({
@@ -57,8 +68,9 @@ export async function reportRoutes(app: FastifyInstance) {
   // correct/total, so a question tagged with more than one topic counts
   // toward each of its tags, same as within a single attempt. Sorted
   // weakest-first (lowest accuracy), since the point is showing a student
-  // where to focus, not just listing topics alphabetically.
-  app.get<{ Querystring: { subjectName?: string; classId?: string } }>(
+  // where to focus, not just listing topics alphabetically. Same
+  // profile-scoping rule as /reports above.
+  app.get<{ Querystring: { subjectName?: string; classId?: string; profileId?: string } }>(
     "/reports/topics",
     async (request, reply) => {
       const { subjectName, classId } = request.query;
@@ -70,9 +82,13 @@ export async function reportRoutes(app: FastifyInstance) {
         subjectId = subject.id;
       }
 
+      const identity = request.identity!;
+      const profileId = identity.kind === "profile" ? identity.profileId : request.query.profileId;
+
       const conditions = [sql`${quizAttempts.topicBreakdown} is not null`];
       if (subjectId) conditions.push(sql`${quizAttempts.subjectId} = ${subjectId}`);
       if (classId) conditions.push(sql`${quizAttempts.classId} = ${classId}`);
+      if (profileId) conditions.push(sql`${quizAttempts.profileId} = ${profileId}`);
 
       const whereClause = sql.join(conditions, sql` and `);
 

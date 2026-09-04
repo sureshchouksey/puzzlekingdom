@@ -9,6 +9,8 @@ import { quizRoutes } from "./routes/quizzes.js";
 import { reportRoutes } from "./routes/reports.js";
 import { profileRoutes } from "./routes/profiles.js";
 import { leaderboardRoutes } from "./routes/leaderboard.js";
+import { registerAuth } from "./auth.js";
+import { adminRoutes } from "./routes/admin.js";
 
 const app = Fastify({ logger: true });
 
@@ -36,6 +38,11 @@ app.addHook("onRequest", async (request, reply) => {
 // already does the real check, so a 200 here just confirms it passed.
 app.get("/auth/check", async () => ({ ok: true }));
 
+// Real per-user sessions (profile or admin), layered on top of the shared
+// passcode gate above. Soft: most routes don't require a logged-in caller,
+// same as before this existed - see auth.ts.
+await registerAuth(app);
+
 await app.register(subjectRoutes);
 await app.register(classRoutes);
 await app.register(documentRoutes);
@@ -43,6 +50,7 @@ await app.register(quizRoutes);
 await app.register(reportRoutes);
 await app.register(profileRoutes);
 await app.register(leaderboardRoutes);
+await app.register(adminRoutes);
 
 app.listen({ port: env.PORT, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);

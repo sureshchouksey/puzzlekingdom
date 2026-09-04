@@ -30,6 +30,24 @@ export const profiles = pgTable("profiles", {
   // Cosmetic only ("Prince" / "Princess", matching the Welcome screen) -
   // free text rather than an enum since it's purely decorative.
   title: text("title"),
+  // A 4-digit PIN (bcrypt-hashed), set once by POST /profiles/:id/set-pin
+  // and thereafter checked by POST /profiles/:id/verify-pin - this is what
+  // makes a profile a real per-child login rather than just a name anyone
+  // could type. Null until first set (older profiles, or a fresh one that
+  // hasn't finished onboarding yet); an admin can null it out again via
+  // the "reset PIN" action to recover a forgotten one.
+  pinHash: text("pin_hash"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// A real administrator account (username + bcrypt password hash) - the
+// one place that can create/edit/delete questions and see every user's
+// data. Separate from `profiles`, which are just named players with no
+// login at all.
+export const admins = pgTable("admins", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -112,7 +130,7 @@ export const quizAttempts = pgTable("quiz_attempts", {
 export const quizAttemptAnswers = pgTable("quiz_attempt_answers", {
   id: uuid("id").primaryKey().defaultRandom(),
   attemptId: uuid("attempt_id").notNull().references(() => quizAttempts.id),
-  questionId: uuid("question_id").notNull().references(() => questions.id),
+  questionId: uuid("question_id").notNull().references(() => questions.id, { onDelete: "cascade" }),
   selectedOptionId: text("selected_option_id").notNull(),
   isCorrect: boolean("is_correct").notNull(),
 });
