@@ -1,72 +1,139 @@
 import type { FastifyInstance } from "fastify";
-import { eq, sql, inArray } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { subjects, questions, documents, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
+import { subjects, classes, profiles, questions, documents, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
 
-const DEFAULT_QUESTION_COUNT = 10;
+const DEFAULT_STAGE_SIZE = 10;
+
+// Tally correct/total per topic tag across a set of answered questions. A
+// question with more than one topic tag (questions.topics is a tag array)
+// contributes to every tag it carries - e.g. a question tagged both
+// "Fractions, Decimals & Percentages" and "Word Problems" counts toward
+// both topics' totals. Questions with no topics tagged are simply skipped
+// (they don't contribute to any topic's report).
+function buildTopicBreakdown(
+  graded: { topics: string[] | null; isCorrect: boolean }[]
+): Record<string, { correct: number; total: number }> {
+  const breakdown: Record<string, { correct: number; total: number }> = {};
+  for (const g of graded) {
+    for (const topic of g.topics ?? []) {
+      const entry = (breakdown[topic] ??= { correct: 0, total: 0 });
+      entry.total += 1;
+      if (g.isCorrect) entry.correct += 1;
+    }
+  }
+  return breakdown;
+}
 
 export async function quizRoutes(app: FastifyInstance) {
-  // Assemble a quiz: pick up to `count` questions at random from whatever's
-  // already saved for this subject, and create a quiz_attempts row to track
-  // it. Never calls an AI provider - this only ever reads questions that
-  // were generated once, earlier, at upload time.
-  app.post<{ Body: { subjectName?: string; count?: number } }>("/quizzes", async (request, reply) => {
+  // Assemble a quiz: by default, pull in EVERY question already saved for
+  // this subject (optionally narrowed to one class and/or one topic) - not
+  // just a small sample - and create a quiz_attempts row to track it. An
+  // explicit `count` still limits how many are picked (used by the
+  // smoke-test script), but the app's own UI no longer sends one. Never
+  // calls an AI provider - this only ever reads questions that were
+  // generated once, earlier, at upload time.
+  //
+  // The attempt is also broken into "stages" of `stageSize` questions each
+  // (clamped to the actual question count picked) - purely a positional
+  // grouping of the array returned here, not a separate per-question tag,
+  // so /quizzes/:id/submit and the frontend both chunk the same list the
+  // same way. With the whole question bank pulled in and a small stage
+  // size, this naturally produces many stages (e.g. 200 questions at 10
+  // per stage = 20 stages) rather than just one or two.
+  app.post<{
+    Body: { subjectName?: string; classId?: string; topic?: string; count?: number; profileId?: string; stageSize?: number };
+  }>("/quizzes", async (request, reply) => {
     const subjectName = request.body?.subjectName;
-    const count = request.body?.count ?? DEFAULT_QUESTION_COUNT;
+    const classId = request.body?.classId;
+    const topic = request.body?.topic;
+    const profileId = request.body?.profileId;
+    // No default cap - omitting `count` pulls in every matching question.
+    const count = request.body?.count;
 
     if (!subjectName) return reply.status(400).send({ error: "subjectName is required" });
 
     const [subject] = await db.select().from(subjects).where(eq(subjects.name, subjectName)).limit(1);
     if (!subject) return reply.status(404).send({ error: `No subject named "${subjectName}"` });
 
+    const conditions = [eq(questions.subjectId, subject.id)];
+    if (classId) conditions.push(eq(documents.classId, classId));
+    // topics is a text[] tag array - a question matches if the requested
+    // topic is one of (possibly several) tags on it.
+    if (topic) conditions.push(sql`${questions.topics} @> ARRAY[${topic}]::text[]`);
+
     // Joined with documents so each question can carry its source
-    // document's id and (if any) shared reading passage - questions from a
-    // comprehension paper all point back to the same passage, which the
-    // quiz-taker needs to read before answering, not just derived answers
-    // with no source text shown.
-    const picked = await db
+    // document's id, class, and (if any) shared reading passage -
+    // questions from a comprehension paper all point back to the same
+    // passage, which the quiz-taker needs to read before answering, not
+    // just derived answers with no source text shown.
+    const baseQuery = db
       .select({
         id: questions.id,
         questionText: questions.questionText,
         options: questions.options,
         documentId: questions.documentId,
         passage: documents.passage,
+        topics: questions.topics,
       })
       .from(questions)
       .innerJoin(documents, eq(questions.documentId, documents.id))
-      .where(eq(questions.subjectId, subject.id))
-      .orderBy(sql`random()`)
-      .limit(count);
+      .where(and(...conditions))
+      .orderBy(sql`random()`);
+
+    const picked = typeof count === "number" ? await baseQuery.limit(count) : await baseQuery;
 
     if (picked.length === 0) {
-      return reply.status(404).send({ error: `No questions saved yet for subject "${subjectName}".` });
+      return reply.status(404).send({ error: `No questions saved yet for subject "${subjectName}" matching those filters.` });
     }
+
+    const requestedStageSize = request.body?.stageSize ?? DEFAULT_STAGE_SIZE;
+    const stageSize = Math.min(Math.max(1, Math.trunc(requestedStageSize) || DEFAULT_STAGE_SIZE), picked.length);
+    const totalStages = Math.ceil(picked.length / stageSize);
 
     const [attempt] = await db
       .insert(quizAttempts)
-      .values({ subjectId: subject.id, totalQuestions: picked.length })
+      .values({
+        subjectId: subject.id,
+        classId: classId ?? undefined,
+        profileId: profileId ?? undefined,
+        totalQuestions: picked.length,
+        stageSize,
+      })
       .returning();
 
     // Correct answers and explanations are deliberately withheld here - a
     // quiz-taker shouldn't be able to read them out of the network
     // response before submitting. They come back from /results instead,
-    // after submission.
+    // after the whole attempt is complete.
     return reply.status(201).send({
       attemptId: attempt.id,
       subjectName: subject.name,
+      stageSize,
+      totalStages,
       questions: picked.map((q) => ({
         id: q.id,
         questionText: q.questionText,
         options: q.options,
         documentId: q.documentId,
         passage: q.passage,
+        topics: q.topics,
       })),
     });
   });
 
-  // Score a completed quiz. Trusts nothing from the client about
-  // correctness - looks up each question's real correctOptionId from the
-  // database and compares server-side.
+  // Score one stage's worth of answers at a time - NOT necessarily the
+  // whole quiz in one call. A quiz-taker finishes a stage (say, 5
+  // questions), this is called with just those answers, and the response
+  // says how many stages are now cleared and whether the whole attempt is
+  // complete. Calling this again later with the next stage's answers picks
+  // up where it left off. This is what lets stages_cleared - and so the
+  // leaderboard - reflect real progress even if a quiz is never finished.
+  //
+  // Idempotent: any questionId already answered for this attempt is
+  // silently skipped rather than double-counted, so a duplicate click (or
+  // a caller that resends every answer in one call, as the old one-shot
+  // API did) can't inflate the score or the stage count.
   app.post<{ Params: { id: string }; Body: { answers?: { questionId: string; selectedOptionId: string }[] } }>(
     "/quizzes/:id/submit",
     async (request, reply) => {
@@ -83,36 +150,97 @@ export async function quizRoutes(app: FastifyInstance) {
         return reply.status(409).send({ error: "This quiz attempt was already submitted." });
       }
 
-      const questionIds = answers.map((a) => a.questionId);
-      const realQuestions = await db.select().from(questions).where(inArray(questions.id, questionIds));
-      const byId = new Map(realQuestions.map((q) => [q.id, q]));
+      const alreadyAnswered = await db
+        .select({ questionId: quizAttemptAnswers.questionId })
+        .from(quizAttemptAnswers)
+        .where(eq(quizAttemptAnswers.attemptId, id));
+      const alreadyAnsweredIds = new Set(alreadyAnswered.map((a) => a.questionId));
 
-      const answerRows = answers.map((a) => {
-        const question = byId.get(a.questionId);
-        const isCorrect = question ? question.correctOptionId === a.selectedOptionId : false;
-        return {
+      const newAnswers = answers.filter((a) => !alreadyAnsweredIds.has(a.questionId));
+
+      if (newAnswers.length > 0) {
+        const questionIds = newAnswers.map((a) => a.questionId);
+        const realQuestions = await db.select().from(questions).where(inArray(questions.id, questionIds));
+        const byId = new Map(realQuestions.map((q) => [q.id, q]));
+
+        const rows = newAnswers.map((a) => {
+          const question = byId.get(a.questionId);
+          return {
+            attemptId: id,
+            questionId: a.questionId,
+            selectedOptionId: a.selectedOptionId,
+            isCorrect: question ? question.correctOptionId === a.selectedOptionId : false,
+          };
+        });
+
+        await db.insert(quizAttemptAnswers).values(rows);
+      }
+
+      const totalAnswered = alreadyAnsweredIds.size + newAnswers.length;
+      const totalStages = Math.ceil(attempt.totalQuestions / attempt.stageSize);
+      const stagesCleared = Math.min(Math.floor(totalAnswered / attempt.stageSize), totalStages);
+      const isComplete = totalAnswered >= attempt.totalQuestions;
+
+      // How many of the just-submitted answers were correct, for the
+      // stage-cleared interstitial - purely informational about this call,
+      // not the overall score.
+      const stageScore = await db
+        .select({ isCorrect: quizAttemptAnswers.isCorrect })
+        .from(quizAttemptAnswers)
+        .where(and(eq(quizAttemptAnswers.attemptId, id), inArray(quizAttemptAnswers.questionId, answers.map((a) => a.questionId))));
+      const stageCorrect = stageScore.filter((s) => s.isCorrect).length;
+
+      if (!isComplete) {
+        await db.update(quizAttempts).set({ stagesCleared }).where(eq(quizAttempts.id, id));
+        return reply.send({
           attemptId: id,
-          questionId: a.questionId,
-          selectedOptionId: a.selectedOptionId,
-          isCorrect,
-        };
-      });
+          stagesCleared,
+          totalStages,
+          stageScore: stageCorrect,
+          stageTotal: answers.length,
+          isComplete: false,
+        });
+      }
 
-      await db.insert(quizAttemptAnswers).values(answerRows);
+      // Final stage just submitted - finalize the whole attempt: compute
+      // the overall score and topic breakdown from every recorded answer
+      // (across every stage, not just this call's), same as the old
+      // single-shot submit did.
+      const allAnswers = await db
+        .select({
+          isCorrect: quizAttemptAnswers.isCorrect,
+          topics: questions.topics,
+        })
+        .from(quizAttemptAnswers)
+        .innerJoin(questions, eq(quizAttemptAnswers.questionId, questions.id))
+        .where(eq(quizAttemptAnswers.attemptId, id));
 
-      const score = answerRows.filter((a) => a.isCorrect).length;
+      const score = allAnswers.filter((a) => a.isCorrect).length;
+      const topicBreakdown = buildTopicBreakdown(allAnswers);
 
       await db
         .update(quizAttempts)
-        .set({ completedAt: new Date(), score })
+        .set({ completedAt: new Date(), score, topicBreakdown, stagesCleared: totalStages })
         .where(eq(quizAttempts.id, id));
 
-      return reply.send({ attemptId: id, score, totalQuestions: attempt.totalQuestions });
+      return reply.send({
+        attemptId: id,
+        stagesCleared: totalStages,
+        totalStages,
+        stageScore: stageCorrect,
+        stageTotal: answers.length,
+        isComplete: true,
+        score,
+        totalQuestions: attempt.totalQuestions,
+        topicBreakdown,
+      });
     }
   );
 
   // Full results + answer review: every question, what was picked, what
-  // was actually correct, and the explanation.
+  // was actually correct, the explanation, and - especially for a wrong
+  // answer - the memorable trick/tip for that question, plus this
+  // attempt's saved topic-progress breakdown and stage progress.
   app.get<{ Params: { id: string } }>("/quizzes/:id/results", async (request, reply) => {
     const { id } = request.params;
 
@@ -123,6 +251,12 @@ export async function quizRoutes(app: FastifyInstance) {
     }
 
     const [subject] = await db.select().from(subjects).where(eq(subjects.id, attempt.subjectId)).limit(1);
+    const [classRow] = attempt.classId
+      ? await db.select().from(classes).where(eq(classes.id, attempt.classId)).limit(1)
+      : [undefined];
+    const [profileRow] = attempt.profileId
+      ? await db.select().from(profiles).where(eq(profiles.id, attempt.profileId)).limit(1)
+      : [undefined];
 
     const answerRows = await db
       .select()
@@ -139,8 +273,10 @@ export async function quizRoutes(app: FastifyInstance) {
               options: questions.options,
               correctOptionId: questions.correctOptionId,
               explanation: questions.explanation,
+              tip: questions.tip,
               documentId: questions.documentId,
               passage: documents.passage,
+              topics: questions.topics,
             })
             .from(questions)
             .innerJoin(documents, eq(questions.documentId, documents.id))
@@ -151,9 +287,15 @@ export async function quizRoutes(app: FastifyInstance) {
     return reply.send({
       attemptId: attempt.id,
       subjectName: subject?.name ?? null,
+      className: classRow?.name ?? null,
+      profileName: profileRow?.name ?? null,
       score: attempt.score,
       totalQuestions: attempt.totalQuestions,
+      stageSize: attempt.stageSize,
+      totalStages: Math.ceil(attempt.totalQuestions / attempt.stageSize),
+      stagesCleared: attempt.stagesCleared,
       completedAt: attempt.completedAt,
+      topicBreakdown: attempt.topicBreakdown ?? {},
       answers: answerRows.map((a) => {
         const question = byId.get(a.questionId);
         return {
@@ -163,9 +305,13 @@ export async function quizRoutes(app: FastifyInstance) {
           selectedOptionId: a.selectedOptionId,
           correctOptionId: question?.correctOptionId ?? null,
           explanation: question?.explanation ?? null,
+          // Only worth showing the tip when it's actually needed - a
+          // correct answer doesn't need a trick for next time.
+          tip: !a.isCorrect ? question?.tip ?? null : null,
           isCorrect: a.isCorrect,
           documentId: question?.documentId ?? null,
           passage: question?.passage ?? null,
+          topics: question?.topics ?? null,
         };
       }),
     });

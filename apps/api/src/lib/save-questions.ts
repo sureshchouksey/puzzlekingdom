@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { subjects, documents, questions } from "../db/schema.js";
+import { subjects, classes, documents, questions } from "../db/schema.js";
 import { generatedQuestionSetSchema, type GeneratedQuestion } from "./question-schema.js";
 
 export async function ensureSubject(name: string) {
@@ -8,6 +8,16 @@ export async function ensureSubject(name: string) {
   if (existing[0]) return existing[0];
 
   const [created] = await db.insert(subjects).values({ name }).returning();
+  return created;
+}
+
+// The audience a document targets - e.g. "11+ Grammar Prep", "Year 3".
+// Same ensure-or-create pattern as ensureSubject.
+export async function ensureClass(name: string) {
+  const existing = await db.select().from(classes).where(eq(classes.name, name)).limit(1);
+  if (existing[0]) return existing[0];
+
+  const [created] = await db.insert(classes).values({ name }).returning();
   return created;
 }
 
@@ -23,12 +33,18 @@ export async function createSeedDocument(params: {
   // shown to the quiz-taker before its questions (e.g. CSSE English
   // papers). Omit/undefined for content with no shared passage (e.g. Maths).
   passage?: string;
+  // The audience this content targets (e.g. "11+ Grammar Prep", "Year 3").
+  // Optional for backward compatibility with older callers, but new
+  // seeding should always set this.
+  classLabel?: string;
 }) {
   const subject = await ensureSubject(params.subjectName);
+  const classRow = params.classLabel ? await ensureClass(params.classLabel) : undefined;
   const [doc] = await db
     .insert(documents)
     .values({
       subjectId: subject.id,
+      classId: classRow?.id,
       originalFilename: params.filename,
       storagePath: `seed:${params.filename}`,
       mimeType: params.mimeType,
@@ -54,6 +70,8 @@ export async function saveGeneratedQuestions(params: {
     options: q.options,
     correctOptionId: q.correctOptionId,
     explanation: q.explanation,
+    topics: q.topics,
+    tip: q.tip,
   }));
 
   const inserted = await db.insert(questions).values(rows).returning({ id: questions.id });

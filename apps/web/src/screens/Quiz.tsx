@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { submitQuiz } from "../api";
-import type { AssembleQuizResponse, QuizQuestion } from "../types";
+import { submitStage } from "../api";
+import type { AssembleQuizResponse, QuizQuestion, SubmitStageResponse } from "../types";
 import { Layout, styles } from "./Layout";
 
-// Groups questions by their source document, in first-appearance order, so
-// a passage-based document's story is only shown once, before all of its
-// questions - rather than repeating it, or showing questions with no
-// context at all.
+// Groups a stage's questions by their source document, in first-appearance
+// order, so a passage-based document's story is only shown once, before
+// all of its questions - rather than repeating it, or showing questions
+// with no context at all.
 function groupByDocument(qs: QuizQuestion[]): { documentId: string; passage: string | null; questions: QuizQuestion[] }[] {
   const groups: { documentId: string; passage: string | null; questions: QuizQuestion[] }[] = [];
   const indexByDocument = new Map<string, number>();
@@ -22,6 +22,17 @@ function groupByDocument(qs: QuizQuestion[]): { documentId: string; passage: str
   return groups;
 }
 
+// Splits the (already randomized) question list into fixed-size stages,
+// positionally - the same chunking the backend uses to compute
+// stagesCleared, so both sides always agree on what "stage N" means.
+function chunkIntoStages(qs: QuizQuestion[], stageSize: number): QuizQuestion[][] {
+  const stages: QuizQuestion[][] = [];
+  for (let i = 0; i < qs.length; i += stageSize) {
+    stages.push(qs.slice(i, i + stageSize));
+  }
+  return stages;
+}
+
 export function Quiz({
   quiz,
   onSubmitted,
@@ -29,30 +40,67 @@ export function Quiz({
   quiz: AssembleQuizResponse;
   onSubmitted: (attemptId: string) => void;
 }) {
+  const stages = useMemo(() => chunkIntoStages(quiz.questions, quiz.stageSize), [quiz.questions, quiz.stageSize]);
+
+  const [currentStageIndex, setCurrentStageIndex] = useState(0);
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set right after a non-final stage is scored - shows the "stage
+  // cleared" interstitial until the player chooses to continue.
+  const [stageResult, setStageResult] = useState<SubmitStageResponse | null>(null);
 
-  const groups = useMemo(() => groupByDocument(quiz.questions), [quiz.questions]);
-  const allAnswered = quiz.questions.every((q) => selections[q.id]);
+  const currentStage = stages[currentStageIndex] ?? [];
+  const groups = useMemo(() => groupByDocument(currentStage), [currentStage]);
+  const allAnswered = currentStage.every((q) => selections[q.id]);
 
-  async function submit() {
+  async function finishStage() {
     setSubmitting(true);
     setError(null);
     try {
-      const answers = quiz.questions.map((q) => ({ questionId: q.id, selectedOptionId: selections[q.id] }));
-      await submitQuiz({ attemptId: quiz.attemptId, answers });
-      onSubmitted(quiz.attemptId);
+      const answers = currentStage.map((q) => ({ questionId: q.id, selectedOptionId: selections[q.id] }));
+      const result = await submitStage({ attemptId: quiz.attemptId, answers });
+      if (result.isComplete) {
+        onSubmitted(quiz.attemptId);
+      } else {
+        setStageResult(result);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to submit quiz");
+      setError(err instanceof Error ? err.message : "Failed to submit stage");
+    } finally {
       setSubmitting(false);
     }
+  }
+
+  function continueToNextStage() {
+    setStageResult(null);
+    setCurrentStageIndex((i) => i + 1);
+  }
+
+  if (stageResult) {
+    const stagesToGo = stageResult.totalStages - stageResult.stagesCleared;
+    return (
+      <Layout title={`${quiz.subjectName} quiz`}>
+        <div style={{ ...styles.card, textAlign: "center", padding: 32 }}>
+          <p style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
+            🎉 Stage {stageResult.stagesCleared} cleared!
+          </p>
+          <p style={{ ...styles.muted, marginBottom: 20 }}>
+            {stageResult.stageScore} / {stageResult.stageTotal} correct this stage
+            {stagesToGo > 0 ? ` — ${stagesToGo} stage${stagesToGo === 1 ? "" : "s"} to go` : ""}
+          </p>
+          <button style={styles.primaryButton} onClick={continueToNextStage}>
+            Continue to stage {stageResult.stagesCleared + 1}
+          </button>
+        </div>
+      </Layout>
+    );
   }
 
   let questionNumber = 0;
 
   return (
-    <Layout title={`${quiz.subjectName} quiz`}>
+    <Layout title={`${quiz.subjectName} quiz — stage ${currentStageIndex + 1} of ${stages.length}`}>
       {groups.map((group) => (
         <div key={group.documentId}>
           {group.passage && (
@@ -108,10 +156,10 @@ export function Quiz({
         </div>
       ))}
 
-      <button style={styles.primaryButton} onClick={submit} disabled={!allAnswered || submitting}>
-        {submitting ? "Submitting..." : "Submit answers"}
+      <button style={styles.primaryButton} onClick={finishStage} disabled={!allAnswered || submitting}>
+        {submitting ? "Submitting..." : currentStageIndex + 1 === stages.length ? "Finish quiz" : "Finish stage"}
       </button>
-      {!allAnswered && <p style={{ ...styles.muted, marginTop: 8 }}>Answer every question to submit.</p>}
+      {!allAnswered && <p style={{ ...styles.muted, marginTop: 8 }}>Answer every question to continue.</p>}
       {error && <p style={styles.error}>{error}</p>}
     </Layout>
   );

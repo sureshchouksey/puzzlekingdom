@@ -1,0 +1,37 @@
+# Render "Blueprint" for the API - lets you create the web service by
+# pointing Render at this repo (New + -> Blueprint) instead of typing every
+# setting by hand. Values marked `sync: false` are secrets you still have
+# to paste into the Render dashboard yourself after the service is
+# created; Render deliberately won't read secrets out of a file in a
+# public repo. Buildcommand/startCommand run from the repo root (this is
+# an npm workspaces monorepo), not from apps/api - see apps/api/README-ish
+# comments in package.json for what each script does.
+services:
+  - type: web
+    name: puzzlekingdom-api
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build -w apps/api
+    startCommand: npm run start:prod -w apps/api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: AI_PROVIDER
+        value: claude
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: course-content
+      - key: APP_PASSCODE
+        sync: false

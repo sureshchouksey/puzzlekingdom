@@ -35,3 +35,11 @@ coverage/
 # public GitHub repo. Kept locally for personal development/practice use
 # only. See plan/MVP1-Content-to-Quiz-Plan.md for the seeding workflow.
 docs/official-papers/
+
+# Year 3/4 mock-test content (source docx + generated MCQ JSON) is the
+# user's own original material, not copyrighted like CSSE's, but stays
+# local-only by their choice rather than published in this public repo.
+# The questions themselves are already seeded into the live database
+# (Supabase), so the deployed app works fine without these files present.
+docs/Year3 content/
+docs/Year 4 Content/

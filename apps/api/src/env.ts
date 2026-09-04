@@ -14,6 +14,11 @@ const envSchema = z
     SUPABASE_URL: z.string().min(1, "SUPABASE_URL is required"),
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
     SUPABASE_STORAGE_BUCKET: z.string().default("course-content"),
+    // Shared family passcode gating every route except /health, for the
+    // public deployment. Optional on purpose: leaving it unset (local dev,
+    // LAN-only access) disables the gate entirely, so nothing changes for
+    // development.
+    APP_PASSCODE: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.AI_PROVIDER === "claude" && !data.ANTHROPIC_API_KEY) {

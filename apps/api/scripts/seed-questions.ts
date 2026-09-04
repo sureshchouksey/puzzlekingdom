@@ -1,18 +1,28 @@
 #!/usr/bin/env tsx
 // Content-seeding CLI: takes a JSON file of already-generated questions
 // (produced by the "convert course content to quiz" Claude Code skill, or
-// by hand) and writes them into the database against a subject, creating a
-// `documents` row to represent the source material.
+// by hand) and writes them into the database against a subject and class,
+// creating a `documents` row to represent the source material.
 //
 // Usage:
-//   npm run seed:questions -- --subject "Maths" --source path/to/content.pdf --questions path/to/generated-questions.json
-//   npm run seed:questions -- --subject "English" --source path/to/paper.pdf --questions path/to/questions.json --passage path/to/passage.txt
+//   npm run seed:questions -- --subject "Maths" --class "11+ Grammar Prep" --source path/to/content.pdf --questions path/to/generated-questions.json
+//   npm run seed:questions -- --subject "English" --class "11+ Grammar Prep" --source path/to/paper.pdf --questions path/to/questions.json --passage path/to/passage.txt
+//
+// --class labels the audience this content targets (e.g. "11+ Grammar
+// Prep" for CSSE/CCHS exam content, "Year 3" for National Curriculum
+// course content) - it's the top level of the Class -> Subject -> Topic
+// browsing structure. Optional for backward compatibility, but should
+// always be set for new content.
 //
 // --passage is optional: a plain text file containing the shared reading
 // passage/story that every question in --questions refers back to (e.g.
 // a CSSE English comprehension paper). Omit it for content with no shared
 // passage, like Maths. When present, the app shows this text to the
 // quiz-taker once, before the questions drawn from this document.
+//
+// Per-question topic labels (e.g. "Fractions, Decimals & Percentages")
+// are read straight from an optional "topic" field on each question
+// object in --questions, not passed as a CLI flag.
 //
 // --source and --questions are resolved relative to the directory you ran
 // the command FROM (via npm's INIT_CWD), not this script's own folder - so
@@ -52,13 +62,14 @@ function resolvePath(p: string): string {
 
 async function main() {
   const subject = arg("subject");
+  const classLabel = arg("class");
   const sourceFile = arg("source");
   const questionsFile = arg("questions");
   const passageFile = arg("passage");
 
   if (!subject || !sourceFile || !questionsFile) {
     console.error(
-      'Usage: npm run seed:questions -- --subject "Maths" --source path/to/content.pdf --questions path/to/generated-questions.json'
+      'Usage: npm run seed:questions -- --subject "Maths" --class "11+ Grammar Prep" --source path/to/content.pdf --questions path/to/generated-questions.json'
     );
     process.exit(1);
   }
@@ -71,6 +82,7 @@ async function main() {
     filename: basename(sourceFile),
     mimeType: mimeTypeFor(sourceFile),
     passage,
+    classLabel,
   });
 
   const result = await saveGeneratedQuestions({
