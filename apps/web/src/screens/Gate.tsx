@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { checkPasscode, PASSCODE_STORAGE_KEY } from "../api";
+import { checkPasscode, getStoredPasscode, PASSCODE_STORAGE_KEY } from "../api";
 import { styles } from "./Layout";
 
 // Gates the whole app behind one shared family passcode, for the public
@@ -10,7 +10,23 @@ import { styles } from "./Layout";
 // dev, LAN-only access), /auth/check always succeeds with no header at
 // all, so this never prompts and the app behaves exactly as before.
 export function Gate({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<"checking" | "locked" | "unlocked">("checking");
+  // Render immediately from what's already known locally, rather than
+  // blocking on a network round-trip before painting anything - a real
+  // problem found in production, not a hypothetical one: this used to
+  // default to "checking" and show nothing but a bare "Loading..." until
+  // GET /auth/check resolved, which on the API's Render free-tier
+  // deployment can mean 30-60+ seconds of a blank screen every time the
+  // instance has gone idle (it sleeps after ~15 minutes of no traffic).
+  // A stored passcode is trusted optimistically here (shows the real app
+  // right away); no stored passcode shows the entry form right away -
+  // either way, the first paint no longer waits on the API at all. The
+  // background check below still runs and corrects either direction: a
+  // stale/wrong stored passcode gets kicked back to locked, and "no
+  // passcode configured at all" (local/LAN dev, where APP_PASSCODE is
+  // unset and /auth/check always succeeds) auto-unlocks even with
+  // nothing stored - it just no longer holds up the first thing a
+  // visitor sees.
+  const [status, setStatus] = useState<"locked" | "unlocked">(() => (getStoredPasscode() ? "unlocked" : "locked"));
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,14 +59,6 @@ export function Gate({ children }: { children: ReactNode }) {
       }
     }
     setSubmitting(false);
-  }
-
-  if (status === "checking") {
-    return (
-      <main style={{ maxWidth: 360, margin: "120px auto", padding: 24, textAlign: "center" }}>
-        <p style={styles.muted}>Loading...</p>
-      </main>
-    );
   }
 
   if (status === "unlocked") {

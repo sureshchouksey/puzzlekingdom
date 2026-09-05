@@ -1,18 +1,34 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   createAdminQuestion,
   deleteAdminQuestion,
+  generateTutorInsights,
   getAdminQuestions,
   getAdminUsers,
+  getTutorConversation,
+  getTutorConversationsForProfile,
+  getTutorInsights,
+  getTutorSettings,
   logout,
   resetProfilePin,
   updateAdminQuestion,
+  updateTutorSettings,
 } from "../api";
-import type { AdminQuestion, AdminQuestionWriteInput, AdminUser, AdminUserSummary, QuizOption } from "../types";
+import type {
+  AdminQuestion,
+  AdminQuestionWriteInput,
+  AdminUser,
+  AdminUserSummary,
+  QuizOption,
+  TutorConversation,
+  TutorInsightsResponse,
+  TutorSettings,
+  TutorTranscript,
+} from "../types";
 import { Layout, styles } from "./Layout";
 import { Upload } from "./Upload";
 
-type Tab = "questions" | "users" | "content";
+type Tab = "questions" | "users" | "content" | "studyBuddy";
 
 const OPTION_LABELS = ["a", "b", "c", "d", "e", "f"] as const;
 
@@ -356,10 +372,107 @@ function QuestionsTab() {
   );
 }
 
+// One profile's doubt-tracking breakdown + growth insights (Section 10
+// step 8) - rendered inline below its row in UsersTab when expanded,
+// rather than a separate screen, since this is a small amount of
+// admin-only detail per profile, not a whole new area of the app.
+// Fetched lazily (only once a row is actually expanded) since most
+// profiles won't be looked at on a given admin visit.
+function StudyBuddyInsightsPanel({ profileId, profileName }: { profileId: string; profileName: string }) {
+  const [data, setData] = useState<TutorInsightsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  function load() {
+    setError(null);
+    getTutorInsights(profileId)
+      .then(setData)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load Study Buddy insights"));
+  }
+
+  useEffect(load, [profileId]);
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await generateTutorInsights(profileId);
+      if (result.generated) {
+        load();
+      } else {
+        setNotice(`${profileName} hasn't asked enough questions on any one topic yet - nothing new to summarize.`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate insights");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  if (error) return <p style={styles.error}>{error}</p>;
+  if (data === null) return <p style={styles.muted}>Loading Study Buddy insights...</p>;
+
+  const { breakdown, insights } = data;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+        <p style={{ ...styles.muted, margin: 0 }}>
+          Last 30 days: {breakdown.totalAgentReplies} Study Buddy repl{breakdown.totalAgentReplies === 1 ? "y" : "ies"}
+          {breakdown.ungroundedCount > 0 ? `, ${breakdown.ungroundedCount} with no matching lesson content` : ""}.
+        </p>
+        <button style={styles.secondaryButton} onClick={handleGenerate} disabled={generating}>
+          {generating ? "Generating..." : "Generate insights"}
+        </button>
+      </div>
+
+      {notice && <p style={{ ...styles.muted, fontStyle: "italic", marginBottom: 12 }}>{notice}</p>}
+
+      {breakdown.topicCounts.length === 0 && insights.length === 0 && (
+        <p style={styles.muted}>No Study Buddy activity in the last 30 days.</p>
+      )}
+
+      {breakdown.topicCounts.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: insights.length > 0 ? 16 : 0 }}>
+          {breakdown.topicCounts.map((t) => (
+            <span
+              key={t.topic}
+              style={{
+                fontSize: 13,
+                padding: "4px 10px",
+                borderRadius: 999,
+                background: "#f6f1e6",
+                border: "1px solid #c3c2b7",
+              }}
+            >
+              {t.topic} ×{t.count}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {insights.map((i) => (
+        <div key={i.id} style={{ ...styles.card, background: "#fbf8f1", border: "1px solid #d8cfb8" }}>
+          <p style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>{i.topic}</p>
+          <p style={{ fontSize: 14, marginBottom: 4 }}>{i.insightText}</p>
+          <p style={{ ...styles.muted, fontSize: 12, margin: 0 }}>
+            Generated {new Date(i.generatedAt).toLocaleDateString()}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function UsersTab() {
   const [rows, setRows] = useState<AdminUserSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
+  // Which profile's Study Buddy panel is open, if any - only one at a
+  // time, and its own component (above) handles its own data fetching.
+  const [expandedProfileId, setExpandedProfileId] = useState<string | null>(null);
 
   function load() {
     getAdminUsers()
@@ -404,29 +517,268 @@ function UsersTab() {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.profileId} style={{ borderBottom: "1px solid #e3ddd0" }}>
-              <td style={{ padding: "8px 12px", fontWeight: 600 }}>{r.name}</td>
-              <td style={{ padding: "8px 12px" }}>{r.title ?? "–"}</td>
-              <td style={{ padding: "8px 12px" }}>{r.hasPin ? "Set" : "Not set yet"}</td>
-              <td style={{ padding: "8px 12px" }}>{r.quizzesPlayed}</td>
-              <td style={{ padding: "8px 12px" }}>{r.stagesCleared}</td>
-              <td style={{ padding: "8px 12px" }}>{r.accuracy !== null ? `${Math.round(r.accuracy * 100)}%` : "–"}</td>
-              <td style={{ padding: "8px 12px" }}>{r.lastActive ? new Date(r.lastActive).toLocaleDateString() : "–"}</td>
-              <td style={{ padding: "8px 12px" }}>
-                {r.hasPin && (
+            <Fragment key={r.profileId}>
+              <tr style={{ borderBottom: expandedProfileId === r.profileId ? "none" : "1px solid #e3ddd0" }}>
+                <td style={{ padding: "8px 12px", fontWeight: 600 }}>{r.name}</td>
+                <td style={{ padding: "8px 12px" }}>{r.title ?? "–"}</td>
+                <td style={{ padding: "8px 12px" }}>{r.hasPin ? "Set" : "Not set yet"}</td>
+                <td style={{ padding: "8px 12px" }}>{r.quizzesPlayed}</td>
+                <td style={{ padding: "8px 12px" }}>{r.stagesCleared}</td>
+                <td style={{ padding: "8px 12px" }}>{r.accuracy !== null ? `${Math.round(r.accuracy * 100)}%` : "–"}</td>
+                <td style={{ padding: "8px 12px" }}>{r.lastActive ? new Date(r.lastActive).toLocaleDateString() : "–"}</td>
+                <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
                   <button
-                    onClick={() => handleResetPin(r.profileId, r.name)}
-                    disabled={resettingId === r.profileId}
-                    style={{ background: "none", border: "none", color: "#8a1f11", cursor: "pointer", fontSize: 13 }}
+                    onClick={() => setExpandedProfileId(expandedProfileId === r.profileId ? null : r.profileId)}
+                    style={{ background: "none", border: "none", color: "#1a3c6e", cursor: "pointer", fontSize: 13, marginRight: 12 }}
                   >
-                    {resettingId === r.profileId ? "Resetting..." : "Reset PIN"}
+                    {expandedProfileId === r.profileId ? "Hide Study Buddy" : "Study Buddy"}
                   </button>
-                )}
-              </td>
-            </tr>
+                  {r.hasPin && (
+                    <button
+                      onClick={() => handleResetPin(r.profileId, r.name)}
+                      disabled={resettingId === r.profileId}
+                      style={{ background: "none", border: "none", color: "#8a1f11", cursor: "pointer", fontSize: 13 }}
+                    >
+                      {resettingId === r.profileId ? "Resetting..." : "Reset PIN"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+              {expandedProfileId === r.profileId && (
+                <tr style={{ borderBottom: "1px solid #e3ddd0" }}>
+                  <td colSpan={8} style={{ padding: "0 12px 16px" }}>
+                    <StudyBuddyInsightsPanel profileId={r.profileId} profileName={r.name} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// The on/off toggle + caps, and a per-profile conversation browser -
+// Section 10 step 9's "Study Buddy tab", deliberately separate from step
+// 8's inline per-profile insights panel in the Users tab (see that
+// step's own note on the split). Settings and conversation-browsing are
+// independent concerns sharing one tab purely because both are
+// admin-only Study Buddy housekeeping, not because they interact.
+function StudyBuddySettingsPanel() {
+  const [settings, setSettings] = useState<TutorSettings | null>(null);
+  const [draft, setDraft] = useState<TutorSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  function load() {
+    getTutorSettings()
+      .then((s) => {
+        setSettings(s);
+        setDraft(s);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load settings"));
+  }
+
+  useEffect(load, []);
+
+  async function handleSave() {
+    if (!draft) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const updated = await updateTutorSettings(draft);
+      setSettings(updated);
+      setDraft(updated);
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (error) return <p style={styles.error}>{error}</p>;
+  if (draft === null) return <p style={styles.muted}>Loading settings...</p>;
+
+  const dirty = settings !== null && JSON.stringify(settings) !== JSON.stringify(draft);
+
+  return (
+    <div style={{ ...styles.card, maxWidth: 420 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={draft.tutorEnabled}
+          onChange={(e) => setDraft({ ...draft, tutorEnabled: e.target.checked })}
+        />
+        <span>Study Buddy is {draft.tutorEnabled ? "on" : "off"} for everyone</span>
+      </label>
+
+      <label style={{ display: "block", marginBottom: 16 }}>
+        <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>Daily message cap, per profile</span>
+        <input
+          type="number"
+          min={1}
+          value={draft.tutorDailyCapPerProfile}
+          onChange={(e) => setDraft({ ...draft, tutorDailyCapPerProfile: Math.max(1, Number(e.target.value) || 1) })}
+          style={{ padding: "8px 12px", fontSize: 14, width: 120 }}
+        />
+      </label>
+
+      <label style={{ display: "block", marginBottom: 16 }}>
+        <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>
+          Shared daily budget across everyone (optional - not enforced yet, see the plan doc)
+        </span>
+        <input
+          type="number"
+          min={1}
+          value={draft.tutorSharedDailyBudget ?? ""}
+          placeholder="No shared limit"
+          onChange={(e) =>
+            setDraft({ ...draft, tutorSharedDailyBudget: e.target.value === "" ? null : Math.max(1, Number(e.target.value) || 1) })
+          }
+          style={{ padding: "8px 12px", fontSize: 14, width: 160 }}
+        />
+      </label>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button style={styles.primaryButton} onClick={handleSave} disabled={saving || !dirty}>
+          {saving ? "Saving..." : "Save"}
+        </button>
+        {saved && !dirty && <span style={{ ...styles.muted, fontSize: 13 }}>Saved.</span>}
+      </div>
+    </div>
+  );
+}
+
+// One profile's chat history, read-only - picked from a dropdown rather
+// than a search, since this is a small, single-family instance where
+// the whole roster fits comfortably in one <select>.
+function StudyBuddyConversationsPanel() {
+  const [profiles, setProfiles] = useState<AdminUserSummary[] | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
+  const [conversations, setConversations] = useState<TutorConversation[] | null>(null);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState<TutorTranscript | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getAdminUsers()
+      .then(setProfiles)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load profiles"));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProfileId) {
+      setConversations(null);
+      return;
+    }
+    setError(null);
+    setConversations(null);
+    setSelectedConversationId(null);
+    setTranscript(null);
+    getTutorConversationsForProfile(selectedProfileId)
+      .then(setConversations)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load conversations"));
+  }, [selectedProfileId]);
+
+  useEffect(() => {
+    if (!selectedConversationId) {
+      setTranscript(null);
+      return;
+    }
+    setError(null);
+    getTutorConversation(selectedConversationId)
+      .then(setTranscript)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load transcript"));
+  }, [selectedConversationId]);
+
+  if (error) return <p style={styles.error}>{error}</p>;
+
+  return (
+    <div>
+      <select
+        value={selectedProfileId}
+        onChange={(e) => setSelectedProfileId(e.target.value)}
+        style={{ padding: "8px 12px", fontSize: 14, marginBottom: 16 }}
+      >
+        <option value="">Pick a player...</option>
+        {profiles?.map((p) => (
+          <option key={p.profileId} value={p.profileId}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+
+      {selectedProfileId && conversations === null && <p style={styles.muted}>Loading conversations...</p>}
+      {selectedProfileId && conversations !== null && conversations.length === 0 && (
+        <p style={styles.muted}>No Study Buddy conversations yet for this player.</p>
+      )}
+
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+        {conversations && conversations.length > 0 && (
+          <div style={{ minWidth: 220 }}>
+            {conversations.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setSelectedConversationId(c.id)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  marginBottom: 8,
+                  ...styles.secondaryButton,
+                  background: selectedConversationId === c.id ? "#1a3c6e" : styles.secondaryButton.background,
+                  color: selectedConversationId === c.id ? "#fff" : styles.secondaryButton.color,
+                }}
+              >
+                <div style={{ fontWeight: 600 }}>
+                  {c.className ?? "?"} · {c.subjectName ?? "?"}
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.85 }}>
+                  {c.contextType === "question" ? "Explain this to me" : "General chat"} · last active{" "}
+                  {new Date(c.lastMessageAt).toLocaleDateString()}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {transcript && (
+          <div style={{ flex: 1, minWidth: 260, border: "1px solid #e3ddd0", borderRadius: 10, padding: 16, maxHeight: 420, overflowY: "auto" }}>
+            {transcript.messages.length === 0 && <p style={styles.muted}>No messages in this conversation yet.</p>}
+            {transcript.messages.map((m, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: m.role === "student" ? "flex-end" : "flex-start", marginBottom: 10 }}>
+                <div
+                  style={{
+                    maxWidth: "80%",
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    fontSize: 14,
+                    background: m.role === "student" ? "#1a3c6e" : "#f0ece0",
+                    color: m.role === "student" ? "#fff" : "#241d1a",
+                  }}
+                >
+                  {m.content}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StudyBuddyTab() {
+  return (
+    <div>
+      <h2 style={{ fontSize: 16, marginBottom: 12 }}>Settings</h2>
+      <StudyBuddySettingsPanel />
+      <h2 style={{ fontSize: 16, margin: "28px 0 12px" }}>Conversations</h2>
+      <StudyBuddyConversationsPanel />
     </div>
   );
 }
@@ -446,7 +798,7 @@ export function AdminDashboard({ admin, onLogOut }: { admin: AdminUser; onLogOut
   return (
     <Layout title={`Admin · ${admin.username}`}>
       <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap", alignItems: "center" }}>
-        {(["questions", "users", "content"] as Tab[]).map((t) => (
+        {(["questions", "users", "content", "studyBuddy"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -456,7 +808,7 @@ export function AdminDashboard({ admin, onLogOut }: { admin: AdminUser; onLogOut
               color: tab === t ? "#fff" : styles.secondaryButton.color,
             }}
           >
-            {t === "questions" ? "Questions" : t === "users" ? "Users" : "Add content"}
+            {t === "questions" ? "Questions" : t === "users" ? "Users" : t === "content" ? "Add content" : "Study Buddy"}
           </button>
         ))}
         <button onClick={handleLogOut} style={{ ...styles.secondaryButton, marginLeft: "auto" }}>
@@ -467,6 +819,7 @@ export function AdminDashboard({ admin, onLogOut }: { admin: AdminUser; onLogOut
       {tab === "questions" && <QuestionsTab />}
       {tab === "users" && <UsersTab />}
       {tab === "content" && <Upload />}
+      {tab === "studyBuddy" && <StudyBuddyTab />}
     </Layout>
   );
 }

@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "node .claude/hooks/block-official-papers-edits.js" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "node .claude/hooks/typecheck-after-ts-edit.js" }
+        ]
+      }
+    ]
+  }
+}

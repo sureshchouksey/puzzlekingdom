@@ -10,6 +10,18 @@ const envSchema = z
     ANTHROPIC_API_KEY: z.string().optional(),
     GEMINI_API_KEY: z.string().optional(),
     GEMINI_MODEL: z.string().default("gemini-3.8-flash"),
+    // Deliberately a SEPARATE model from GEMINI_MODEL above. GEMINI_MODEL
+    // generates quiz questions and is free to be whatever the best paid
+    // model is; the tutor (plan/AI-Study-Mentor-Agent-Plan.md, Section 6)
+    // has to stay on a genuinely free-tier model no matter what
+    // GEMINI_MODEL is set to, since Section 9's whole shared-daily-budget
+    // design assumes $0 marginal cost per tutor reply. gemini-3.1-flash-lite
+    // is the current free-tier model (confirmed via Google's own model
+    // page, September 2026) - if Google ever moves it behind billing (see
+    // Section 6's own note that this has already happened to Pro models),
+    // this is the one line to change, and the tutor's real-cost assumption
+    // in Section 6 needs revisiting at the same time.
+    GEMINI_TUTOR_MODEL: z.string().default("gemini-3.1-flash-lite"),
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
     SUPABASE_URL: z.string().min(1, "SUPABASE_URL is required"),
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),

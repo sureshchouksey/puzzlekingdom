@@ -11,6 +11,7 @@ import { profileRoutes } from "./routes/profiles.js";
 import { leaderboardRoutes } from "./routes/leaderboard.js";
 import { registerAuth } from "./auth.js";
 import { adminRoutes } from "./routes/admin.js";
+import { tutorRoutes } from "./routes/tutor.js";
 
 const app = Fastify({ logger: true });
 
@@ -51,6 +52,7 @@ await app.register(reportRoutes);
 await app.register(profileRoutes);
 await app.register(leaderboardRoutes);
 await app.register(adminRoutes);
+await app.register(tutorRoutes);
 
 app.listen({ port: env.PORT, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);

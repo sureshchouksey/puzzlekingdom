@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, integer, boolean, jsonb, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, integer, boolean, jsonb, pgEnum, real } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 // Puzzle Kingdom - MVP1 schema (see docs/PLAN.md "Database schema (first cut)")
@@ -135,18 +135,43 @@ export const quizAttemptAnswers = pgTable("quiz_attempt_answers", {
   isCorrect: boolean("is_correct").notNull(),
 });
 
+// The "how do you actually solve this kind of problem" method/formula
+// reference for a topic - distinct from any one question's explanation/
+// tip (those answer one specific question; this is the general method).
+// See plan/AI-Study-Mentor-Agent-Plan.md, Section 8. Content is authored
+// via the content-author subagent (Section 10, step 2), not written here -
+// this table starts empty. Backs the get_concept_guide MCP tool
+// (mcp-server.ts), which returns "not found" honestly for any topic
+// without a row yet rather than fabricating one.
+export const conceptGuides = pgTable("concept_guides", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  classId: uuid("class_id").notNull().references(() => classes.id),
+  subjectId: uuid("subject_id").notNull().references(() => subjects.id),
+  // Same free-text tag convention as questions.topics - not a foreign key,
+  // since topics are tag strings, not a table of their own.
+  topic: text("topic").notNull(),
+  title: text("title").notNull(),
+  methodText: text("method_text").notNull(),
+  formula: text("formula"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const classesRelations = relations(classes, ({ many }) => ({
   documents: many(documents),
+  conceptGuides: many(conceptGuides),
 }));
 
 export const subjectsRelations = relations(subjects, ({ many }) => ({
   documents: many(documents),
   questions: many(questions),
   attempts: many(quizAttempts),
+  conceptGuides: many(conceptGuides),
 }));
 
 export const profilesRelations = relations(profiles, ({ many }) => ({
   attempts: many(quizAttempts),
+  tutorConversations: many(tutorConversations),
+  tutorGrowthInsights: many(tutorGrowthInsights),
 }));
 
 export const documentsRelations = relations(documents, ({ one, many }) => ({
@@ -171,4 +196,94 @@ export const quizAttemptsRelations = relations(quizAttempts, ({ one, many }) => 
 export const quizAttemptAnswersRelations = relations(quizAttemptAnswers, ({ one }) => ({
   attempt: one(quizAttempts, { fields: [quizAttemptAnswers.attemptId], references: [quizAttempts.id] }),
   question: one(questions, { fields: [quizAttemptAnswers.questionId], references: [questions.id] }),
+}));
+
+export const conceptGuidesRelations = relations(conceptGuides, ({ one }) => ({
+  class: one(classes, { fields: [conceptGuides.classId], references: [classes.id] }),
+  subject: one(subjects, { fields: [conceptGuides.subjectId], references: [subjects.id] }),
+}));
+
+// Section 10 step 5 (plan/AI-Study-Mentor-Agent-Plan.md) - the tutor's
+// on/off toggle and per-profile daily message cap. A real singleton: the
+// migration's `id boolean primary key default true` + check constraint
+// makes a second row physically impossible, not just discouraged by
+// convention, so callers can always read/write this one known row without
+// a lookup. tutorSharedDailyBudget is intentionally unenforced right now -
+// see the migration's own comment on why a single per-profile cap is
+// enough at this app's current (single-family) scale.
+export const appSettings = pgTable("app_settings", {
+  id: boolean("id").primaryKey().default(true),
+  tutorEnabled: boolean("tutor_enabled").notNull().default(true),
+  tutorDailyCapPerProfile: integer("tutor_daily_cap_per_profile").notNull().default(30),
+  tutorSharedDailyBudget: integer("tutor_shared_daily_budget"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// One row per tutor chat session - see tutorBudget.ts and the
+// not-yet-built POST /tutor/conversations route (Section 9). A "general"
+// Ask-your-Study-Buddy chat and an "Explain this to me" chat are
+// distinguished by contextType; the latter also carries which question/
+// attempt it's about.
+export const tutorConversations = pgTable("tutor_conversations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  profileId: uuid("profile_id").notNull().references(() => profiles.id),
+  // Fixed for the conversation's whole lifetime, set once at POST
+  // /tutor/conversations and read on every message - see migration 0009's
+  // own comment on why this couldn't just be re-sent per message.
+  subjectId: uuid("subject_id").notNull().references(() => subjects.id),
+  classId: uuid("class_id").notNull().references(() => classes.id),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
+  contextType: text("context_type").notNull().default("general"),
+  relatedQuestionId: uuid("related_question_id").references(() => questions.id),
+  relatedAttemptId: uuid("related_attempt_id").references(() => quizAttempts.id),
+});
+
+// The real transcript. matchedSourceType/matchedSourceId/matchScore mirror
+// tutorRetrieval.ts's RetrievedSource and tutorGeneration.ts's TutorReply
+// (`type` -> matchedSourceType, a source's `id` -> matchedSourceId, `rank`
+// -> matchScore) and are only ever set on 'agent' rows - see Section 8's
+// note on keeping this correspondence when writing to this table.
+export const tutorMessages = pgTable("tutor_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  conversationId: uuid("conversation_id")
+    .notNull()
+    .references(() => tutorConversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  matchedSourceType: text("matched_source_type"),
+  matchedSourceId: uuid("matched_source_id"),
+  matchScore: real("match_score"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const tutorConversationsRelations = relations(tutorConversations, ({ one, many }) => ({
+  profile: one(profiles, { fields: [tutorConversations.profileId], references: [profiles.id] }),
+  subject: one(subjects, { fields: [tutorConversations.subjectId], references: [subjects.id] }),
+  class: one(classes, { fields: [tutorConversations.classId], references: [classes.id] }),
+  relatedQuestion: one(questions, { fields: [tutorConversations.relatedQuestionId], references: [questions.id] }),
+  relatedAttempt: one(quizAttempts, { fields: [tutorConversations.relatedAttemptId], references: [quizAttempts.id] }),
+  messages: many(tutorMessages),
+}));
+
+export const tutorMessagesRelations = relations(tutorMessages, ({ one }) => ({
+  conversation: one(tutorConversations, { fields: [tutorMessages.conversationId], references: [tutorConversations.id] }),
+}));
+
+// Distilled, parent-facing summaries of what a profile's been asking
+// about - see tutorInsights.ts (Section 10 step 8). One row per
+// (profile, topic), enforced by a unique index (migration 0010) so
+// regenerating overwrites rather than accumulating duplicates.
+export const tutorGrowthInsights = pgTable("tutor_growth_insights", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  profileId: uuid("profile_id")
+    .notNull()
+    .references(() => profiles.id, { onDelete: "cascade" }),
+  topic: text("topic").notNull(),
+  insightText: text("insight_text").notNull(),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const tutorGrowthInsightsRelations = relations(tutorGrowthInsights, ({ one }) => ({
+  profile: one(profiles, { fields: [tutorGrowthInsights.profileId], references: [profiles.id] }),
 }));

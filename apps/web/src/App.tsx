@@ -9,7 +9,8 @@ import { Reports } from "./screens/Reports";
 import { Leaderboard } from "./screens/Leaderboard";
 import { AdminLogin } from "./screens/AdminLogin";
 import { AdminDashboard } from "./screens/AdminDashboard";
-import type { AdminUser, AssembleQuizResponse, PkClass, Profile } from "./types";
+import { StudyBuddy } from "./screens/StudyBuddy";
+import type { AdminUser, AssembleQuizResponse, PkClass, Profile, TutorQuestionContext } from "./types";
 
 type Screen =
   | { name: "welcome" }
@@ -21,7 +22,12 @@ type Screen =
   | { name: "reports" }
   | { name: "leaderboard" }
   | { name: "adminLogin" }
-  | { name: "adminDashboard" };
+  | { name: "adminDashboard" }
+  | { name: "studyBuddyClassPicker" }
+  // Exactly one of pkClass/questionContext is set, depending on which
+  // entry point led here (Home's general chat vs. "Explain this to me"
+  // on a wrong answer - see StudyBuddy.tsx for the full explanation).
+  | { name: "studyBuddy"; pkClass?: PkClass; questionContext?: TutorQuestionContext };
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -50,6 +56,7 @@ export default function App() {
           onPlay={() => setScreen({ name: "classPicker" })}
           onViewReports={() => setScreen({ name: "reports" })}
           onViewLeaderboard={() => setScreen({ name: "leaderboard" })}
+          onOpenStudyBuddy={() => setScreen({ name: "studyBuddyClassPicker" })}
         />
       );
     case "classPicker":
@@ -84,7 +91,11 @@ export default function App() {
     }
     case "quiz":
       return (
-        <Quiz quiz={screen.quiz} onSubmitted={(attemptId) => setScreen({ name: "results", attemptId })} />
+        <Quiz
+          quiz={screen.quiz}
+          onSubmitted={(attemptId) => setScreen({ name: "results", attemptId })}
+          onExplain={(questionContext) => setScreen({ name: "studyBuddy", questionContext })}
+        />
       );
     case "results":
       return (
@@ -93,6 +104,7 @@ export default function App() {
           onPlayAgain={() =>
             setScreen(lastClass ? { name: "subjectPicker", pkClass: lastClass } : { name: "classPicker" })
           }
+          onExplain={(questionContext) => setScreen({ name: "studyBuddy", questionContext })}
         />
       );
     case "reports":
@@ -124,6 +136,24 @@ export default function App() {
             setAdmin(null);
             setScreen({ name: "welcome" });
           }}
+        />
+      );
+    // A separate class picker instance from "classPicker" above - same
+    // component, different next step (studyBuddy's subject picker rather
+    // than quiz assembly's subjectPicker).
+    case "studyBuddyClassPicker":
+      return (
+        <ClassPicker
+          onBack={() => setScreen({ name: "home" })}
+          onClassSelected={(pkClass) => setScreen({ name: "studyBuddy", pkClass })}
+        />
+      );
+    case "studyBuddy":
+      return (
+        <StudyBuddy
+          pkClass={screen.pkClass}
+          questionContext={screen.questionContext}
+          onBack={() => setScreen({ name: "home" })}
         />
       );
   }

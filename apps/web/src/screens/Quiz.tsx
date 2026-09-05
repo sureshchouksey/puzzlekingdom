@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { submitStage } from "../api";
-import type { AssembleQuizResponse, QuizQuestion, SubmitStageResponse } from "../types";
+import type { AssembleQuizResponse, QuizQuestion, SubmitStageResponse, TutorQuestionContext } from "../types";
 import { Layout, styles } from "./Layout";
 
 // Groups a stage's questions by their source document, in first-appearance
@@ -36,9 +36,15 @@ function chunkIntoStages(qs: QuizQuestion[], stageSize: number): QuizQuestion[][
 export function Quiz({
   quiz,
   onSubmitted,
+  onExplain,
 }: {
   quiz: AssembleQuizResponse;
   onSubmitted: (attemptId: string) => void;
+  // "Explain this to me" on a wrong answer - Section 10 step 7. Only
+  // wired up when quiz.classId is actually set (see AssembleQuizResponse)
+  // - the app's own UI always supplies one, but the type keeps it
+  // nullable since the backend route itself doesn't require it.
+  onExplain: (context: TutorQuestionContext) => void;
 }) {
   const stages = useMemo(() => chunkIntoStages(quiz.questions, quiz.stageSize), [quiz.questions, quiz.stageSize]);
 
@@ -157,6 +163,23 @@ export function Quiz({
                 <p style={{ fontSize: 13, marginTop: 8, color: "#8a4b12" }}>
                   💡 <strong>Tip:</strong> {a.tip}
                 </p>
+              )}
+              {!a.isCorrect && quiz.classId && (
+                <button
+                  style={styles.linkButton}
+                  onClick={() =>
+                    onExplain({
+                      classId: quiz.classId!,
+                      subjectId: quiz.subjectId,
+                      subjectName: quiz.subjectName,
+                      questionId: a.questionId,
+                      questionText: a.questionText,
+                      attemptId: quiz.attemptId,
+                    })
+                  }
+                >
+                  💬 Explain this to me
+                </button>
               )}
             </div>
           );

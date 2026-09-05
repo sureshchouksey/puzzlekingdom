@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getResults } from "../api";
-import type { QuizResults, ResultsAnswer } from "../types";
+import type { QuizResults, ResultsAnswer, TutorQuestionContext } from "../types";
 import { Layout, styles } from "./Layout";
 
 // Same grouping approach as the Quiz screen: show each passage once, right
@@ -21,7 +21,18 @@ function groupByDocument(answers: ResultsAnswer[]): { documentId: string; passag
   return groups;
 }
 
-export function Results({ attemptId, onPlayAgain }: { attemptId: string; onPlayAgain: () => void }) {
+export function Results({
+  attemptId,
+  onPlayAgain,
+  onExplain,
+}: {
+  attemptId: string;
+  onPlayAgain: () => void;
+  // "Explain this to me" on a wrong answer - Section 10 step 7. Same
+  // guard as Quiz.tsx: only offered when results.classId and the
+  // question's own text are both actually present.
+  onExplain: (context: TutorQuestionContext) => void;
+}) {
   const [results, setResults] = useState<QuizResults | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,6 +124,23 @@ export function Results({ attemptId, onPlayAgain }: { attemptId: string; onPlayA
                   <p style={{ fontSize: 13, marginTop: 8, color: "#8a4b12" }}>
                     💡 <strong>Tip:</strong> {a.tip}
                   </p>
+                )}
+                {!a.isCorrect && a.questionText && results.classId && (
+                  <button
+                    style={styles.linkButton}
+                    onClick={() =>
+                      onExplain({
+                        classId: results.classId!,
+                        subjectId: results.subjectId,
+                        subjectName: results.subjectName ?? "",
+                        questionId: a.questionId,
+                        questionText: a.questionText!,
+                        attemptId,
+                      })
+                    }
+                  >
+                    💬 Explain this to me
+                  </button>
                 )}
               </div>
             );

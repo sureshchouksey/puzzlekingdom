@@ -129,6 +129,12 @@ export async function quizRoutes(app: FastifyInstance) {
     return reply.status(201).send({
       attemptId: attempt.id,
       subjectName: subject.name,
+      // Carried along so the frontend can start a question-scoped Study
+      // Buddy conversation ("Explain this to me" - Section 10 step 7)
+      // straight from a wrong answer, without a second round-trip just to
+      // look up which subject/class this attempt belongs to.
+      subjectId: subject.id,
+      classId: classId ?? null,
       stageSize,
       totalStages,
       questions: picked.map((q) => ({
@@ -428,6 +434,11 @@ export async function quizRoutes(app: FastifyInstance) {
     return reply.send({
       attemptId: attempt.id,
       subjectName: subject?.name ?? null,
+      // Same reason as the /quizzes response above - lets Results start a
+      // question-scoped Study Buddy conversation directly from a past
+      // attempt's wrong answers (Section 10 step 7).
+      subjectId: attempt.subjectId,
+      classId: attempt.classId ?? null,
       className: classRow?.name ?? null,
       profileName: profileRow?.name ?? null,
       score: attempt.score,

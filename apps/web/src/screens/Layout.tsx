@@ -59,6 +59,21 @@ export const styles = {
     border: "1px solid #e3ddd0",
     marginBottom: 12,
   },
+  // A small, unobtrusive text-style action inside a card - used for
+  // "Explain this to me" on a wrong answer, where a full button would
+  // visually compete with the primary "continue"/"play again" action.
+  linkButton: {
+    padding: "6px 0",
+    fontSize: 13,
+    fontWeight: 600 as const,
+    cursor: "pointer",
+    background: "none",
+    color: "#1a3c6e",
+    border: "none",
+    textDecoration: "underline",
+    marginTop: 4,
+    display: "block" as const,
+  },
   muted: { color: "#8a8177", fontSize: 14 },
   error: {
     color: "#8a1f11",

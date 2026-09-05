@@ -4,10 +4,27 @@ import { eq, and, desc, ilike, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { admins, questions, documents, subjects, classes, profiles, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
 import { generatedOptionSchema } from "../lib/question-schema.js";
+import { getAppSettings } from "../services/tutorBudget.js";
+import { generateGrowthInsights, getDoubtBreakdown, getGrowthInsights } from "../services/tutorInsights.js";
 import { requireAdmin } from "../auth.js";
 import { z } from "zod";
 
 const DEFAULT_PAGE_SIZE = 30;
+
+// Body shape for PATCH /admin/settings - every field optional, same
+// "only send what changed" convention as questionWriteSchema. tutorEnabled
+// is the Study Buddy on/off switch from Section 10 step 5;
+// tutorDailyCapPerProfile is the per-profile daily message cap (30 by
+// default, see tutorBudget.ts); tutorSharedDailyBudget stays here even
+// though tutorBudget.ts doesn't enforce it yet (deliberately deferred,
+// see that file's header comment) - accepting and storing it now means
+// enabling the shared cap later is a tutorBudget.ts change only, not
+// another route/schema change.
+const settingsWriteSchema = z.object({
+  tutorEnabled: z.boolean().optional(),
+  tutorDailyCapPerProfile: z.number().int().positive().optional(),
+  tutorSharedDailyBudget: z.number().int().positive().nullable().optional(),
+});
 
 // Body shape for creating/editing one question by hand from the admin
 // dashboard - looser than generatedQuestionSchema (every field optional
@@ -250,6 +267,80 @@ export async function adminRoutes(app: FastifyInstance) {
       .returning({ id: profiles.id });
     if (!updated) return reply.status(404).send({ error: "Profile not found" });
     return reply.send({ ok: true });
+  });
+
+  // Doubt tracking + growth insights (Section 10 step 8). GET is cheap
+  // and safe to call anytime - it's a live aggregation over
+  // tutor_messages that already exists (Section 8), plus whatever
+  // insights have already been generated, so the admin dashboard can
+  // show the real breakdown even before anyone's pressed "generate".
+  // POST is the only thing that actually calls Gemini and writes to
+  // tutor_growth_insights - not run on any schedule, see
+  // tutorInsights.ts's own header comment for why that's the right
+  // amount of complexity for a first version here.
+  protectedApp.get<{ Params: { profileId: string } }>("/admin/users/:profileId/tutor-insights", async (request, reply) => {
+    const [profile] = await db.select().from(profiles).where(eq(profiles.id, request.params.profileId)).limit(1);
+    if (!profile) return reply.status(404).send({ error: "Profile not found" });
+    const [breakdown, insights] = await Promise.all([
+      getDoubtBreakdown(request.params.profileId),
+      getGrowthInsights(request.params.profileId),
+    ]);
+    return { breakdown, insights };
+  });
+
+  protectedApp.post<{ Params: { profileId: string } }>(
+    "/admin/users/:profileId/tutor-insights/generate",
+    async (request, reply) => {
+      const [profile] = await db.select().from(profiles).where(eq(profiles.id, request.params.profileId)).limit(1);
+      if (!profile) return reply.status(404).send({ error: "Profile not found" });
+      const result = await generateGrowthInsights(profile.id, profile.name);
+      return reply.send(result);
+    }
+  );
+
+  // The Study Buddy on/off switch and its caps (Section 10 step 5/6) -
+  // reads/writes the same app_settings singleton row tutorBudget.ts's
+  // getAppSettings() reads on every chat turn. GET exists so the admin
+  // dashboard's settings tab has something to load on open; PATCH is the
+  // only writer of this table anywhere in the app (migration 0008 seeds
+  // the one row, nothing else touches it).
+  protectedApp.get("/admin/settings", async () => {
+    return getAppSettings();
+  });
+
+  protectedApp.patch<{ Body: unknown }>("/admin/settings", async (request, reply) => {
+    const parsed = settingsWriteSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "Invalid settings", details: parsed.error.issues });
+    const body = parsed.data;
+
+    if (Object.keys(body).length === 0) {
+      return reply.status(400).send({ error: "At least one setting must be provided" });
+    }
+
+    // app_settings has exactly one row (the "id boolean primary key
+    // default true" + check constraint from migration 0008 makes a
+    // second one impossible), so this is always an update against
+    // id = true, never an insert - the row is guaranteed to already
+    // exist by the time any admin session can reach this route.
+    const current = await getAppSettings();
+    const next = {
+      tutorEnabled: body.tutorEnabled ?? current.tutorEnabled,
+      tutorDailyCapPerProfile: body.tutorDailyCapPerProfile ?? current.tutorDailyCapPerProfile,
+      tutorSharedDailyBudget:
+        body.tutorSharedDailyBudget !== undefined ? body.tutorSharedDailyBudget : current.tutorSharedDailyBudget,
+    };
+
+    await db.execute(sql`
+      update app_settings
+      set
+        tutor_enabled = ${next.tutorEnabled},
+        tutor_daily_cap_per_profile = ${next.tutorDailyCapPerProfile},
+        tutor_shared_daily_budget = ${next.tutorSharedDailyBudget},
+        updated_at = now()
+      where id = true
+    `);
+
+    return reply.send(next);
   });
   });
 }

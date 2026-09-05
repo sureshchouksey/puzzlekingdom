@@ -5,11 +5,13 @@ export function Home({
   onPlay,
   onViewReports,
   onViewLeaderboard,
+  onOpenStudyBuddy,
 }: {
   name: string | null;
   onPlay: () => void;
   onViewReports: () => void;
   onViewLeaderboard: () => void;
+  onOpenStudyBuddy: () => void;
 }) {
   return (
     <Layout title={name ? `Welcome back, ${name}!` : "Puzzle Kingdom"}>
@@ -17,6 +19,9 @@ export function Home({
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 320 }}>
         <button style={styles.primaryButton} onClick={onPlay}>
           Take a quiz
+        </button>
+        <button style={styles.secondaryButton} onClick={onOpenStudyBuddy}>
+          Ask your Study Buddy
         </button>
         <button style={styles.secondaryButton} onClick={onViewLeaderboard}>
           Leaderboard

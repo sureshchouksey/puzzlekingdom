@@ -41,6 +41,13 @@ export type QuizQuestion = {
 export type AssembleQuizResponse = {
   attemptId: string;
   subjectName: string;
+  // Added for Section 10 step 7 ("Explain this to me") - lets the Quiz
+  // screen start a question-scoped Study Buddy conversation without a
+  // second lookup. classId can be null in principle (the backend route
+  // itself doesn't require one), but the app's own UI always supplies one
+  // via SubjectPicker, so in practice this is always set here.
+  subjectId: string;
+  classId: string | null;
   // How many questions make up one stage of this attempt, and how many
   // stages the quiz is broken into in total (Math.ceil(questions.length /
   // stageSize)) - the frontend chunks `questions` into stages positionally
@@ -108,6 +115,9 @@ export type ResultsAnswer = {
 export type QuizResults = {
   attemptId: string;
   subjectName: string | null;
+  // Same reason as AssembleQuizResponse above - Section 10 step 7.
+  subjectId: string;
+  classId: string | null;
   className: string | null;
   profileName: string | null;
   score: number | null;
@@ -288,4 +298,104 @@ export type AdminUserSummary = {
   questionsCorrect: number;
   accuracy: number | null;
   lastActive: string | null;
+};
+
+// The AI Study Mentor ("Study Buddy") - see plan/AI-Study-Mentor-Agent-Plan.md,
+// Section 9/10. A conversation is scoped to one class+subject for its
+// whole lifetime (set once at creation, see POST /tutor/conversations).
+export type TutorContextType = "general" | "question";
+
+export type TutorConversation = {
+  id: string;
+  profileId: string;
+  classId: string;
+  subjectId: string;
+  startedAt: string;
+  lastMessageAt: string;
+  contextType: TutorContextType;
+  relatedQuestionId: string | null;
+  relatedAttemptId: string | null;
+  // Only present on GET /tutor/conversations and GET
+  // /tutor/conversations/:id (Section 10 step 9's admin conversation
+  // browser) - absent on the plain row POST /tutor/conversations
+  // returns when starting/resuming one.
+  subjectName?: string;
+  className?: string;
+};
+
+export type TutorMessageRole = "student" | "agent";
+
+// One turn in the transcript, as stored - createdAt lets the UI order a
+// freshly-loaded conversation correctly.
+export type TutorMessage = {
+  role: TutorMessageRole;
+  content: string;
+  createdAt: string;
+};
+
+export type TutorTranscript = {
+  conversation: TutorConversation;
+  messages: TutorMessage[];
+};
+
+// What POST /tutor/conversations/:id/messages actually returns for one
+// student message: "ai"/"template" are real replies (grounded vs. honest
+// fallback - see tutorGeneration.ts), "blocked" means the budget check
+// stopped it before retrieval/generation ever ran (see `reason`).
+export type TutorMessageMode = "ai" | "template" | "blocked";
+
+export type TutorMessageResponse = {
+  mode: TutorMessageMode;
+  reason?: "daily_cap_reached" | "tutor_disabled";
+  reply: string;
+};
+
+// What's needed to start a question-scoped Study Buddy conversation from
+// one specific wrong answer - Quiz's stage report or Results (Section 10
+// step 7). subjectName is carried along purely for display in the chat
+// screen's title/heading; starting the conversation itself only needs
+// classId/subjectId/questionId (see POST /tutor/conversations).
+export type TutorQuestionContext = {
+  classId: string;
+  subjectId: string;
+  subjectName: string;
+  questionId: string;
+  questionText: string;
+  attemptId: string;
+};
+
+// Doubt tracking + growth insights (Section 10 step 8) - admin-only for
+// now (Section 12's "should this ever surface to the child" question is
+// still open). topicCounts/ungroundedCount/totalAgentReplies are a live
+// aggregation, not stored anywhere themselves; the insights array is
+// what's actually persisted in tutor_growth_insights.
+export type TutorDoubtBreakdown = {
+  topicCounts: { topic: string; count: number }[];
+  ungroundedCount: number;
+  totalAgentReplies: number;
+};
+
+export type TutorGrowthInsight = {
+  id: string;
+  profileId: string;
+  topic: string;
+  insightText: string;
+  generatedAt: string;
+};
+
+export type TutorInsightsResponse = {
+  breakdown: TutorDoubtBreakdown;
+  insights: TutorGrowthInsight[];
+};
+
+export type GenerateInsightsResponse =
+  | { generated: true; insights: TutorGrowthInsight[] }
+  | { generated: false; reason: "not_enough_activity" };
+
+// The admin-only Study Buddy settings toggle/caps (Section 10 step 9) -
+// mirrors apps/api/src/services/tutorBudget.ts's own AppSettings shape.
+export type TutorSettings = {
+  tutorEnabled: boolean;
+  tutorDailyCapPerProfile: number;
+  tutorSharedDailyBudget: number | null;
 };

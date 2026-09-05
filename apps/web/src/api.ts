@@ -19,6 +19,12 @@ import type {
   Subject,
   SubmitStageResponse,
   TopicReport,
+  TutorConversation,
+  TutorMessageResponse,
+  TutorTranscript,
+  TutorInsightsResponse,
+  GenerateInsightsResponse,
+  TutorSettings,
   UploadDocumentResponse,
 } from "./types";
 
@@ -37,7 +43,7 @@ const BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 // harmless no-op.
 export const PASSCODE_STORAGE_KEY = "pk_passcode";
 
-function getStoredPasscode(): string | null {
+export function getStoredPasscode(): string | null {
   try {
     return localStorage.getItem(PASSCODE_STORAGE_KEY);
   } catch {
@@ -312,4 +318,78 @@ export async function resetProfilePin(profileId: string): Promise<void> {
     const message = typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : res.statusText;
     throw new Error(message);
   }
+}
+
+// Starts or resumes a Study Buddy conversation - profile-scoped, see
+// POST /tutor/conversations. classId/subjectId fix the conversation's
+// scope for its whole lifetime; contextType defaults to "general" (the
+// Home entry point) - "question" (the "Explain this to me" entry point)
+// isn't wired up on the frontend yet.
+export function startTutorConversation(params: {
+  classId: string;
+  subjectId: string;
+  contextType?: "general" | "question";
+  questionId?: string;
+  attemptId?: string;
+}): Promise<TutorConversation> {
+  return apiFetch(`/tutor/conversations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  }).then((res) => asJson(res));
+}
+
+// One chat turn - the reply already reflects budget/toggle enforcement
+// (mode: "blocked") as well as grounded vs. honest-fallback replies
+// (mode: "ai" | "template") - see tutor.ts's own comments for what each
+// mode means and why they're kept distinct.
+export function sendTutorMessage(conversationId: string, message: string): Promise<TutorMessageResponse> {
+  return apiFetch(`/tutor/conversations/${conversationId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  }).then((res) => asJson(res));
+}
+
+// Full transcript for one conversation - used to restore history when
+// resuming today's chat rather than starting the UI from a blank slate.
+export function getTutorConversation(id: string): Promise<TutorTranscript> {
+  return apiFetch(`/tutor/conversations/${id}`).then((res) => asJson(res));
+}
+
+// Doubt tracking + growth insights for one profile (Section 10 step 8,
+// admin-only). GET is cheap/safe to call anytime - it's a live
+// aggregation plus whatever's already been generated; the generate call
+// is the one that actually costs a Gemini call and writes new insights.
+export function getTutorInsights(profileId: string): Promise<TutorInsightsResponse> {
+  return apiFetch(`/admin/users/${profileId}/tutor-insights`).then((res) => asJson(res));
+}
+
+export function generateTutorInsights(profileId: string): Promise<GenerateInsightsResponse> {
+  return apiFetch(`/admin/users/${profileId}/tutor-insights/generate`, { method: "POST" }).then((res) => asJson(res));
+}
+
+// The Study Buddy on/off toggle + caps (Section 10 step 9) - reads/writes
+// the same app_settings singleton tutorBudget.ts checks on every chat
+// turn. updateTutorSettings sends whichever fields the settings form
+// currently holds - PATCH merges onto the existing row either way, so
+// sending all three every save is simplest and still correct.
+export function getTutorSettings(): Promise<TutorSettings> {
+  return apiFetch(`/admin/settings`).then((res) => asJson(res));
+}
+
+export function updateTutorSettings(patch: Partial<TutorSettings>): Promise<TutorSettings> {
+  return apiFetch(`/admin/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  }).then((res) => asJson(res));
+}
+
+// A profile's own conversation list (admin override via ?profileId=) -
+// Section 10 step 9's conversation browser. Reuses the same
+// TutorConversation shape general chat already uses, now carrying
+// subjectName/className for display (see types.ts).
+export function getTutorConversationsForProfile(profileId: string): Promise<TutorConversation[]> {
+  return apiFetch(`/tutor/conversations?profileId=${profileId}`).then((res) => asJson(res));
 }

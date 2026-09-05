@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "puzzle-kingdom": {
+      "command": "node",
+      "args": ["--env-file=apps/api/.env", "apps/api/dist/src/mcp-server.js"]
+    }
+  }
+}
