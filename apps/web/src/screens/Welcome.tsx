@@ -1,6 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Parallax from "parallax-js";
+import { motion, useReducedMotion } from "motion/react";
+import { User, ArrowRight } from "lucide-react";
 import { lookupProfile, setProfilePin, verifyProfilePin } from "../api";
 import type { Profile, ProfileLookupResponse } from "../types";
+import "./Welcome.css";
 
 type Title = "Prince" | "Princess";
 
@@ -22,6 +26,7 @@ function capitalize(value: string) {
 function PinInput({ value, onChange, autoFocus }: { value: string; onChange: (v: string) => void; autoFocus?: boolean }) {
   return (
     <input
+      className="pin-input"
       value={value}
       onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
       inputMode="numeric"
@@ -29,8 +34,50 @@ function PinInput({ value, onChange, autoFocus }: { value: string; onChange: (v:
       maxLength={4}
       placeholder="••••"
       autoFocus={autoFocus}
-      style={{ padding: "8px 12px", fontSize: 20, letterSpacing: 6, width: 100, textAlign: "center" }}
     />
+  );
+}
+
+// Five background layers, back to front. Depth controls how far parallax-js
+// shifts each one on mouse/gyro movement - keep sky nearly still and the
+// front castle the most responsive so the scene reads as having real depth.
+// Swap these src paths for your own assets; filenames are just placeholders.
+const LAYERS: { src: string; depth: number; alt: string }[] = [
+  { src: "/parallax/sky.png", depth: 0.0, alt: "" },
+  { src: "/parallax/mountains.png", depth: 0.1, alt: "" },
+  { src: "/parallax/castle-back.png", depth: 0.2, alt: "" },
+  { src: "/parallax/castle-left.png", depth: 0.35, alt: "" },
+  { src: "/parallax/castle-right.png", depth: 0.5, alt: "" },
+];
+
+function KingdomScene() {
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const prefersReducedMotion = useReducedMotion();
+
+  useEffect(() => {
+    if (!sceneRef.current || prefersReducedMotion) return;
+    const instance = new Parallax(sceneRef.current, {
+      relativeInput: true,
+      hoverOnly: false,
+    });
+    return () => instance.destroy();
+  }, [prefersReducedMotion]);
+
+  return (
+    <motion.div
+      className="scene-wrapper"
+      initial={{ y: prefersReducedMotion ? 0 : "12vh", opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <div className="scene" ref={sceneRef}>
+        {LAYERS.map((layer) => (
+          <div className="layer" data-depth={layer.depth} key={layer.src}>
+            <img src={layer.src} alt={layer.alt} draggable={false} />
+          </div>
+        ))}
+      </div>
+    </motion.div>
   );
 }
 
@@ -46,6 +93,7 @@ export function Welcome({ onEnter, onAdminLogin }: { onEnter: (profile: Profile)
   const [confirmPin, setConfirmPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const prefersReducedMotion = useReducedMotion();
 
   async function handleNameSubmit() {
     if (!name.trim()) return;
@@ -113,34 +161,46 @@ export function Welcome({ onEnter, onAdminLogin }: { onEnter: (profile: Profile)
   }
 
   return (
-    <main style={{ maxWidth: 640, margin: "80px auto", padding: "0 24px" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8 }}>Welcome to Puzzle Kingdom</h1>
-      <p style={{ color: "#5a5148" }}>Upload course content, get an AI-generated quiz, see how you did.</p>
-      <img
-        src="/kingdom-castle.jpg"
-        alt="A castle behind a sweeping green lawn"
-        style={{ width: "100%", borderRadius: 12, marginTop: 48, display: "block" }}
-      />
+    <main className="kingdom-page">
+      <KingdomScene />
 
-      <div style={{ marginTop: 32, textAlign: "center" }}>
+      <motion.div
+        className="kingdom-card"
+        initial={{ y: prefersReducedMotion ? 0 : 40, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.8, delay: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <h1 className="kingdom-eyebrow">Welcome to</h1>
+        <h2 className="kingdom-title">Puzzle Kingdom</h2>
+        <p className="kingdom-subtitle">Upload course content, get an AI-generated quiz, see how you did.</p>
+
         {step.kind === "name" && (
           <form
+            className="kingdom-form"
             onSubmit={(e) => {
               e.preventDefault();
               handleNameSubmit();
             }}
           >
-            <p style={{ color: "#5a5148", marginBottom: 12 }}>What's your name?</p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-                style={{ padding: "8px 12px", fontSize: 16 }}
-                autoFocus
-              />
-              <button type="submit" disabled={submitting} style={{ padding: "8px 20px", fontSize: 16, cursor: "pointer" }}>
-                {submitting ? "..." : "Continue"}
+            <p className="kingdom-prompt">What's your name?</p>
+            <div className="kingdom-row">
+              <div className="name-input-wrap">
+                <User className="name-input-icon" size={18} />
+                <input
+                  className="name-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                  autoFocus
+                />
+              </div>
+              <button type="submit" className="btn-primary" disabled={submitting}>
+                {submitting ? "..." : (
+                  <>
+                    Continue
+                    <ArrowRight size={18} />
+                  </>
+                )}
               </button>
             </div>
           </form>
@@ -148,21 +208,15 @@ export function Welcome({ onEnter, onAdminLogin }: { onEnter: (profile: Profile)
 
         {step.kind === "newTitle" && (
           <>
-            <p style={{ color: "#5a5148", marginBottom: 12 }}>Hi {step.looked.name}! Are you a prince or a princess?</p>
-            <div style={{ display: "flex", gap: 24, justifyContent: "center" }}>
-              <button
-                onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Prince" })}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 16 }}
-              >
-                <img src="/prince.png" alt="Prince" style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 12 }} />
-                <div style={{ marginTop: 8 }}>Prince</div>
+            <p className="kingdom-prompt">Hi {step.looked.name}! Are you a prince or a princess?</p>
+            <div className="title-choice-row">
+              <button className="title-choice" onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Prince" })}>
+                <img src="/prince.png" alt="Prince" />
+                <div>Prince</div>
               </button>
-              <button
-                onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Princess" })}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 16 }}
-              >
-                <img src="/princess.png" alt="Princess" style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 12 }} />
-                <div style={{ marginTop: 8 }}>Princess</div>
+              <button className="title-choice" onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Princess" })}>
+                <img src="/princess.png" alt="Princess" />
+                <div>Princess</div>
               </button>
             </div>
           </>
@@ -170,29 +224,24 @@ export function Welcome({ onEnter, onAdminLogin }: { onEnter: (profile: Profile)
 
         {step.kind === "setPin" && (
           <form
+            className="kingdom-form"
             onSubmit={(e) => {
               e.preventDefault();
               handleSetPin(step.looked, step.title);
             }}
           >
-            <p style={{ color: "#5a5148", marginBottom: 4 }}>
-              Choose a 4-digit PIN, {step.looked.name} - you'll use it every time you play.
-            </p>
-            <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 16, marginBottom: 8 }}>
-              <div>
-                <div style={{ color: "#8a8177", fontSize: 12, marginBottom: 4 }}>PIN</div>
+            <p className="kingdom-prompt">Choose a 4-digit PIN, {step.looked.name} - you'll use it every time you play.</p>
+            <div className="pin-row">
+              <div className="pin-field">
+                <div className="pin-label">PIN</div>
                 <PinInput value={pin} onChange={setPin} autoFocus />
               </div>
-              <div>
-                <div style={{ color: "#8a8177", fontSize: 12, marginBottom: 4 }}>Confirm</div>
+              <div className="pin-field">
+                <div className="pin-label">Confirm</div>
                 <PinInput value={confirmPin} onChange={setConfirmPin} />
               </div>
             </div>
-            <button
-              type="submit"
-              disabled={submitting || pin.length !== 4 || confirmPin.length !== 4}
-              style={{ padding: "8px 20px", fontSize: 16, cursor: "pointer", marginTop: 12 }}
-            >
+            <button type="submit" className="btn-primary btn-block" disabled={submitting || pin.length !== 4 || confirmPin.length !== 4}>
               {submitting ? "Saving..." : "Save PIN & enter kingdom"}
             </button>
           </form>
@@ -200,44 +249,34 @@ export function Welcome({ onEnter, onAdminLogin }: { onEnter: (profile: Profile)
 
         {step.kind === "verifyPin" && (
           <form
+            className="kingdom-form"
             onSubmit={(e) => {
               e.preventDefault();
               handleVerifyPin(step.looked);
             }}
           >
-            <p style={{ color: "#5a5148", marginBottom: 12 }}>Welcome back, {step.looked.name}! Enter your PIN.</p>
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+            <p className="kingdom-prompt">Welcome back, {step.looked.name}! Enter your PIN.</p>
+            <div className="pin-row pin-row-center">
               <PinInput value={pin} onChange={setPin} autoFocus />
             </div>
-            <button
-              type="submit"
-              disabled={submitting || pin.length !== 4}
-              style={{ padding: "8px 20px", fontSize: 16, cursor: "pointer" }}
-            >
+            <button type="submit" className="btn-primary btn-block" disabled={submitting || pin.length !== 4}>
               {submitting ? "Entering..." : "Enter Kingdom"}
             </button>
           </form>
         )}
 
         {step.kind !== "name" && (
-          <button
-            type="button"
-            onClick={resetToStart}
-            style={{ background: "none", border: "none", color: "#8a4b12", cursor: "pointer", marginTop: 16, fontSize: 14, display: "block", marginLeft: "auto", marginRight: "auto" }}
-          >
+          <button type="button" className="link-reset" onClick={resetToStart}>
             &larr; Not you? Start over
           </button>
         )}
 
-        {error && <p style={{ color: "#8a1f11", marginTop: 12 }}>{error}</p>}
+        {error && <p className="kingdom-error">{error}</p>}
 
-        <button
-          onClick={onAdminLogin}
-          style={{ background: "none", border: "none", color: "#8a8177", cursor: "pointer", marginTop: 40, fontSize: 13, textDecoration: "underline" }}
-        >
+        <button className="link-admin" onClick={onAdminLogin}>
           Admin login
         </button>
-      </div>
+      </motion.div>
     </main>
   );
 }

@@ -1,0 +1,288 @@
+@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Berkshire+Swash&family=Inter:wght@400;500;600&display=swap");
+
+.kingdom-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Inter", system-ui, sans-serif;
+  background: #bcd4ea; /* fallback while /parallax/sky.jpg loads */
+}
+
+/* ---------- Background scene (5 layers, back to front) ---------- */
+
+.scene-wrapper {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.layer {
+  position: absolute;
+  inset: -6%; /* slight overscan so parallax shifts never expose an edge */
+}
+
+.layer img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  pointer-events: none;
+  
+  /* Forces all scale transforms to grow/shrink from the absolute center */
+  transform-origin: right; 
+}
+
+/* ---------- Welcome card ---------- */
+
+.kingdom-card {
+  position: relative;
+  z-index: 1;
+  width: min(92vw, 560px);
+  margin: 32px;
+  padding: 48px 40px 36px;
+  border-radius: 20px;
+  text-align: center;
+  background: rgba(250, 245, 230, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 30px 60px -20px rgba(20, 20, 40, 0.35);
+}
+
+.kingdom-eyebrow {
+  font-family: "Playfair Display", serif;
+  font-weight: 600;
+  font-size: 28px;
+  color: #1c2b4a;
+  margin: 0;
+}
+
+.kingdom-title {
+  font-family: "Berkshire Swash", cursive;
+  font-weight: 400;
+  font-size: 52px;
+  line-height: 1.15;
+  color: #1d3a8f;
+  margin: 4px 0 16px;
+}
+
+.kingdom-subtitle {
+  color: #5a5148;
+  font-size: 15px;
+  line-height: 1.5;
+  max-width: 38ch;
+  margin: 0 auto 28px;
+}
+
+.kingdom-prompt {
+  color: #5a5148;
+  font-size: 15px;
+  margin: 0 0 14px;
+}
+
+.kingdom-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.kingdom-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  justify-content: center;
+}
+
+.name-input-wrap {
+  position: relative;
+  flex: 1;
+  max-width: 320px;
+}
+
+.name-input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9a9184;
+}
+
+.name-input {
+  width: 100%;
+  padding: 13px 16px 13px 40px;
+  font-size: 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.name-input:focus,
+.pin-input:focus {
+  outline: 2px solid #1d3a8f;
+  outline-offset: 1px;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  padding: 13px 24px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #fff;
+  background: #17264d;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1d3167;
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-block {
+  width: 100%;
+  max-width: 320px;
+  margin-top: 14px;
+}
+
+.title-choice-row {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.title-choice {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: 15px;
+  color: #3a3226;
+}
+
+.title-choice img {
+  width: 130px;
+  height: 130px;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 2px solid transparent;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.title-choice:hover img {
+  border-color: #1d3a8f;
+  transform: translateY(-2px);
+}
+
+.title-choice div {
+  margin-top: 8px;
+}
+
+.pin-row {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  margin: 8px 0 4px;
+}
+
+.pin-row-center {
+  justify-content: center;
+}
+
+.pin-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pin-label {
+  color: #8a8177;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.pin-input {
+  padding: 10px 12px;
+  font-size: 22px;
+  letter-spacing: 8px;
+  width: 100px;
+  text-align: center;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fff;
+}
+
+.link-reset,
+.link-admin {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: block;
+  margin: 18px auto 0;
+}
+
+.link-reset {
+  color: #8a4b12;
+  font-size: 14px;
+}
+
+.link-admin {
+  color: #8a8177;
+  font-size: 13px;
+  text-decoration: underline;
+  margin-top: 32px;
+}
+
+.kingdom-error {
+  color: #8a1f11;
+  font-size: 14px;
+  margin-top: 12px;
+}
+
+/* ---------- Small screens ---------- */
+
+@media (max-width: 480px) {
+  .kingdom-card {
+    padding: 36px 24px 28px;
+  }
+  .kingdom-title {
+    font-size: 40px;
+  }
+  .kingdom-row {
+    flex-direction: column;
+  }
+  .name-input-wrap {
+    max-width: none;
+  }
+}
+
+/* ---------- Respect reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-wrapper,
+  .layer {
+    transition: none !important;
+  }
+}
