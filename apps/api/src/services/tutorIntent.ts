@@ -100,13 +100,13 @@ function buildPrompt(message: string): string {
 // own honest TEMPLATE_FALLBACK_REPLY is still correct there. This is a
 // safety net, not a replacement for the real classifier above.
 const GREETING_PATTERN = /^(hi+|hello+|hey+|hiya|yo|sup|good\s?(morning|afternoon|evening))[\s!.,]*$/i;
-const THANKS_PATTERN = /(thanks?|thank you|thx|ty)/i;
-const RIDDLE_PATTERN = /riddles?/i;
-const JOKE_PATTERN = /jokes?|funny/i;
-const TWISTER_PATTERN = /tongue\s?twisters?|twisters?/i;
-const PUZZLE_PATTERN = /puzzles?|brain\s?teasers?/i;
-const TRIVIA_PATTERN = /trivia|quiz me/i;
-const PLAY_PATTERN = /play|game|something fun|bored|entertain me/i;
+const THANKS_PATTERN = /\b(thanks?|thank you|thx|ty)\b/i;
+const RIDDLE_PATTERN = /\briddles?\b/i;
+const JOKE_PATTERN = /\bjokes?\b|\bfunny\b/i;
+const TWISTER_PATTERN = /\btongue\s?twisters?\b|\btwisters?\b/i;
+const PUZZLE_PATTERN = /\bpuzzles?\b|\bbrain\s?teasers?\b/i;
+const TRIVIA_PATTERN = /\btrivia\b|\bquiz me\b/i;
+const PLAY_PATTERN = /\bplay\b|\bgame\b|\bsomething fun\b|\bbored\b|\bentertain me\b/i;
 
 function heuristicClassifyTutorIntent(message: string): TutorIntent {
   const text = message.trim();
