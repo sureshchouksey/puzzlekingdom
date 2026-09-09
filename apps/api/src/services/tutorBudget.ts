@@ -58,43 +58,55 @@ export async function getAppSettings(): Promise<AppSettings> {
   return row ?? DEFAULT_SETTINGS;
 }
 
-export type BudgetCheck =
-  | { allowed: true }
-  | { allowed: false; reason: "tutor_disabled" }
-  | { allowed: false; reason: "daily_cap_reached"; cap: number; usedToday: number };
+/**
+ * The admin's full kill-switch for Study Buddy (app_settings.tutor_enabled).
+ * Deliberately separate from checkDailyCap below, and checked up front for
+ * EVERY message (tutor.ts) regardless of what it turns out to be - unlike
+ * the daily cap, which is purely a cost control on real Gemini calls, this
+ * is a genuine "the whole feature is off" switch, so it has to block
+ * everything: fun content, arithmetic, hints, all of it, not just academic
+ * questions.
+ */
+export async function isTutorEnabled(): Promise<boolean> {
+  const settings = await getAppSettings();
+  return settings.tutorEnabled;
+}
+
+export type DailyCapCheck = { allowed: true } | { allowed: false; cap: number; usedToday: number };
 
 /**
- * Call this BEFORE generateTutorReply. Counts today's genuinely
- * Gemini-answered academic exchanges for this profile (UTC calendar day -
- * a real per-timezone "today" isn't worth the complexity for a 30/day
- * cap) against the admin-configured cap, and separately checks the
- * tutor's own on/off toggle.
+ * Call this right before generateTutorReply specifically - NOT up front
+ * for the whole route (see tutor.ts, where this moved 9 September 2026).
+ * Counts today's genuinely Gemini-answered academic exchanges for this
+ * profile (UTC calendar day - a real per-timezone "today" isn't worth the
+ * complexity for a 30/day cap) against the admin-configured cap.
  *
  * Revisited 9 September 2026, from the original "count every student
- * message" behaviour: with fun content (riddles/jokes/tongue twisters/
- * puzzles/trivia, hints included) served entirely from Postgres and
- * intent classification degrading to a free keyword heuristic whenever
- * Gemini is unreachable (tutorIntent.ts), counting every message meant a
- * child could hit "you've used up your chats for today" from riddles and
- * greetings alone, without a single real Gemini call ever having
- * happened - not what the cap is actually meant to protect against. The
- * cap is now a pure cost control matching Section 6/9's framing (the same
- * "cost-focused" reasoning the shared daily budget already uses): it only
- * counts an 'agent' message whose matched_source_type is 'question' or
+ * message, checked before anything else runs" behaviour: with fun content
+ * (riddles/jokes/tongue twisters/puzzles/trivia, hints included) served
+ * entirely from Postgres, arithmetic computed locally (tutorArithmetic.ts),
+ * and intent classification degrading to a free keyword heuristic whenever
+ * Gemini is unreachable (tutorIntent.ts), both counting every message AND
+ * checking the cap before even knowing what kind of message this was meant
+ * a child could hit "you've used up your chats for today" from riddles,
+ * sums, and greetings alone - blocking features that never cost anything
+ * once a real Gemini quota happened to run out. The cap is now a pure cost
+ * control matching Section 6/9's framing (the same "cost-focused"
+ * reasoning the shared daily budget already uses): it only counts an
+ * 'agent' message whose matched_source_type is 'question' or
  * 'concept_guide' - recordTutorExchange below only ever sets one of those
  * two when generateTutorReply's reply.mode was actually "ai" (a real,
  * successful Gemini call), logging 'none' otherwise (no retrieval match,
- * or Gemini itself failed and it fell back to TEMPLATE_FALLBACK_REPLY).
- * A greeting/thanks/fun_request/reveal_answer/hint_request/answer_attempt
+ * or Gemini itself failed and it fell back to TEMPLATE_FALLBACK_REPLY). A
+ * greeting/thanks/fun_request/reveal_answer/hint_request/answer_attempt
  * turn (recordSimpleTutorExchange) never sets either of those two values,
  * so none of those count here either, regardless of whether Gemini's key
- * happens to be working.
+ * happens to be working - and tutor.ts now only calls this function at
+ * all once a message has actually been classified as academic, so it can
+ * never block a message before knowing whether it would even need Gemini.
  */
-export async function checkTutorBudget(profileId: string): Promise<BudgetCheck> {
+export async function checkDailyCap(profileId: string): Promise<DailyCapCheck> {
   const settings = await getAppSettings();
-  if (!settings.tutorEnabled) {
-    return { allowed: false, reason: "tutor_disabled" };
-  }
 
   const rows = await db.execute(sql`
     select count(*)::int as count
@@ -108,7 +120,7 @@ export async function checkTutorBudget(profileId: string): Promise<BudgetCheck> 
   const usedToday = Number((rows[0] as unknown as { count: number } | undefined)?.count ?? 0);
 
   if (usedToday >= settings.tutorDailyCapPerProfile) {
-    return { allowed: false, reason: "daily_cap_reached", cap: settings.tutorDailyCapPerProfile, usedToday };
+    return { allowed: false, cap: settings.tutorDailyCapPerProfile, usedToday };
   }
   return { allowed: true };
 }

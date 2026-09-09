@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "../src/db/client.js";
 import { profiles, tutorConversations, classes, subjects } from "../src/db/schema.js";
-import { checkTutorBudget, recordTutorExchange, getAppSettings } from "../src/services/tutorBudget.js";
+import { isTutorEnabled, checkDailyCap, recordTutorExchange, getAppSettings } from "../src/services/tutorBudget.js";
 import type { RetrievalResult } from "../src/services/tutorRetrieval.js";
 import type { TutorReply } from "../src/services/tutorGeneration.js";
 
@@ -9,16 +9,38 @@ import type { TutorReply } from "../src/services/tutorGeneration.js";
 // Section 10 step 5) - exercises the real app_settings/tutor_conversations/
 // tutor_messages tables created by migration 0008 against a real profile,
 // not just types. Makes no Gemini calls at all (every recorded exchange is
-// a fake template-mode reply) - this is purely about the counting/toggle
-// logic, not generation. Creates its own scratch conversation and deletes
-// it again at the end, specifically so this never pollutes a real
-// profile's actual daily count. Run from apps/api, after running migration
-// 0008 in Supabase:
+// a fake "ai"-mode reply with a made-up source) - this is purely about the
+// counting/toggle logic, not generation. Creates its own scratch
+// conversation and deletes it again at the end, specifically so this never
+// pollutes a real profile's actual daily count. Run from apps/api, after
+// running migration 0008 in Supabase:
 //
 //   npx tsx --env-file=.env scripts/test-tutor-budget.ts
+//
+// Updated 9 September 2026: checkTutorBudget split into isTutorEnabled()
+// (the admin on/off toggle - blocks everything) and checkDailyCap()
+// (Gemini-cost-only, counts real "ai"-mode exchanges) - see
+// tutorBudget.ts's own doc comments for why. The daily-cap loop below now
+// records fake exchanges as mode "ai" with a fake matched source, since
+// checkDailyCap only counts those, not every message the way the old
+// checkTutorBudget did.
 
 const FAKE_NOT_MATCHED: RetrievalResult = { matched: false, sources: [] };
-const FAKE_TEMPLATE_REPLY: TutorReply = { mode: "template", reply: "test reply", groundedSourceIds: [] };
+const FAKE_MATCHED: RetrievalResult = {
+  matched: true,
+  sources: [
+    {
+      type: "concept_guide",
+      id: "00000000-0000-0000-0000-000000000000",
+      rank: 1,
+      topic: "test",
+      title: "test",
+      methodText: "test",
+      formula: null,
+    },
+  ],
+};
+const FAKE_AI_REPLY: TutorReply = { mode: "ai", reply: "test reply", groundedSourceIds: [FAKE_MATCHED.sources[0].id] };
 
 async function main() {
   const [profile] = await db.select().from(profiles).limit(1);
@@ -53,41 +75,56 @@ async function main() {
 
   try {
     console.log("=== Before any fake messages ===");
-    let check = await checkTutorBudget(profile.id);
+    let check = await checkDailyCap(profile.id);
     console.log(check);
     if (!check.allowed) {
       console.log(
-        "NOTE: this profile already has real usage today (or the tutor is disabled) - the cap test below may trip immediately instead of after N messages. That's expected if so, not a bug."
+        "NOTE: this profile already has real Gemini-answered usage today - the cap test below may trip immediately instead of after N messages. That's expected if so, not a bug."
       );
     }
 
-    console.log(`\n=== Recording ${settings.tutorDailyCapPerProfile} fake exchanges ===`);
+    console.log(`\n=== Recording ${settings.tutorDailyCapPerProfile} fake "ai"-mode exchanges ===`);
     for (let i = 0; i < settings.tutorDailyCapPerProfile; i++) {
       await recordTutorExchange({
         conversationId: conversation.id,
         studentMessage: `test message ${i + 1}`,
-        retrieval: FAKE_NOT_MATCHED,
-        reply: FAKE_TEMPLATE_REPLY,
+        retrieval: FAKE_MATCHED,
+        reply: FAKE_AI_REPLY,
       });
     }
 
     console.log("\n=== After hitting the cap ===");
-    check = await checkTutorBudget(profile.id);
+    check = await checkDailyCap(profile.id);
     console.log(check);
     if (check.allowed) {
-      console.log("CHECK: expected allowed=false (daily_cap_reached) by now - something's off.");
-    } else if (check.reason === "daily_cap_reached") {
+      console.log("CHECK: expected allowed=false by now - something's off.");
+    } else {
       console.log("OK: cap correctly reached.");
+    }
+
+    console.log("\n=== A fake template-mode (non-Gemini) exchange should NOT count ===");
+    const beforeTemplate = await checkDailyCap(profile.id);
+    await recordTutorExchange({
+      conversationId: conversation.id,
+      studentMessage: "an unmatched question",
+      retrieval: FAKE_NOT_MATCHED,
+      reply: { mode: "template", reply: "test reply", groundedSourceIds: [] },
+    });
+    const afterTemplate = await checkDailyCap(profile.id);
+    if (!beforeTemplate.allowed && !afterTemplate.allowed && beforeTemplate.usedToday === afterTemplate.usedToday) {
+      console.log("OK: a template-mode (no real Gemini call) exchange didn't move usedToday.");
+    } else {
+      console.log("CHECK: expected usedToday to stay unchanged - something's off.", { beforeTemplate, afterTemplate });
     }
 
     console.log("\n=== Toggling tutor_enabled off ===");
     await db.execute(sql`update app_settings set tutor_enabled = false where id = true`);
-    check = await checkTutorBudget(profile.id);
-    console.log(check);
-    if (!check.allowed && check.reason === "tutor_disabled") {
-      console.log("OK: the off toggle blocks a message independently of the cap.");
+    const enabled = await isTutorEnabled();
+    console.log({ tutorEnabled: enabled });
+    if (!enabled) {
+      console.log("OK: the off toggle reports disabled, independently of the daily cap.");
     } else {
-      console.log("CHECK: expected allowed=false (tutor_disabled) - something's off.");
+      console.log("CHECK: expected isTutorEnabled() to return false - something's off.");
     }
     await db.execute(sql`update app_settings set tutor_enabled = true where id = true`);
     console.log("(restored tutor_enabled = true)");

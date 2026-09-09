@@ -3,10 +3,11 @@ import { eq, and, desc, gte } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { classes, subjects, tutorConversations, tutorMessages } from "../db/schema.js";
 import { requireIdentity } from "../auth.js";
-import { checkTutorBudget, recordTutorExchange, recordSimpleTutorExchange } from "../services/tutorBudget.js";
+import { isTutorEnabled, checkDailyCap, recordTutorExchange, recordSimpleTutorExchange } from "../services/tutorBudget.js";
 import { retrieveForQuery, retrieveForQuestion } from "../services/tutorRetrieval.js";
 import { generateTutorReply } from "../services/tutorGeneration.js";
 import { classifyTutorIntent } from "../services/tutorIntent.js";
+import { tryEvaluateArithmetic } from "../services/tutorArithmetic.js";
 import {
   getRandomFunContent,
   getFunContentById,
@@ -224,11 +225,23 @@ export async function tutorRoutes(app: FastifyInstance) {
     return reply.status(201).send({ ...created, greeting });
   });
 
-  // The actual chat turn: budget check -> retrieval -> generation ->
-  // record, each step short-circuiting the next when it doesn't need to
-  // run. A capped-out or disabled profile never reaches retrieval or
-  // generation at all - the cost-consciousness in Section 6/9 extends to
-  // this route, not just the modules it calls.
+  // The actual chat turn: on/off toggle -> arithmetic -> intent
+  // classification -> (daily cap ->) retrieval -> generation -> record,
+  // each step short-circuiting the next when it doesn't need to run.
+  // Updated 9 September 2026, confirmed with the user: fun content,
+  // arithmetic, and intent classification's own keyword fallback all work
+  // without Gemini, and none of them should ever be blocked by either the
+  // admin off-switch's cousin (the daily cap, which is purely a cost
+  // control on real Gemini calls - see tutorBudget.ts) or by which kind of
+  // conversation this is. So checkDailyCap only runs right before the
+  // retrieval -> generation pipeline below, once a message has actually
+  // been classified as academic - not up front for the whole route - and
+  // intent classification itself now runs for EVERY conversation, not
+  // just "general" ones, so a 'question' ("explain this quiz answer")
+  // chat can still ask for a joke or a sum mid-conversation. Only
+  // isTutorEnabled() (the admin's full kill-switch) still gates
+  // everything up front, since that's meant to block the whole feature,
+  // not just its Gemini-dependent half.
   app.post<{ Params: { id: string }; Body: { message?: string } }>(
     "/tutor/conversations/:id/messages",
     async (request, reply) => {
@@ -250,19 +263,41 @@ export async function tutorRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Conversation not found." });
       }
 
-      const budget = await checkTutorBudget(conversation.profileId);
-      if (!budget.allowed) {
-        const replyText = budget.reason === "tutor_disabled" ? TUTOR_DISABLED_REPLY : DAILY_CAP_REPLY;
-        return reply.send({ mode: "blocked", reason: budget.reason, reply: replyText });
+      if (!(await isTutorEnabled())) {
+        return reply.send({ mode: "blocked", reason: "tutor_disabled", reply: TUTOR_DISABLED_REPLY });
       }
 
-      // Intent classification only applies to the free-text "general"
-      // chat - a 'question' conversation's whole point is explaining one
-      // specific wrong answer (its first message is the question text
-      // itself, auto-sent by the frontend), so there's no ambiguity to
-      // resolve and skipping this call keeps that flow both faster and
-      // immune to a misclassification derailing it. See tutorIntent.ts.
-      if (conversation.contextType === "general") {
+      // A bare arithmetic expression ("25 + 20", "5*8", "1/4 + 2/4") is
+      // computed locally and instantly - see tutorArithmetic.ts's own doc
+      // comment for exactly what counts as "bare" (deliberately narrow,
+      // so a real word problem or "how do I add 3-digit numbers" still
+      // falls through to a real explanation below instead of just a
+      // number). Checked before intent classification and unconditionally
+      // for every conversation, same reasoning as fun content: this never
+      // touches Gemini, so it should never depend on it being up, and
+      // never counts against the daily cap.
+      const arithmetic = tryEvaluateArithmetic(message);
+      if (arithmetic) {
+        const replyText = `🧮 ${arithmetic.expression} = ${arithmetic.resultText}`;
+        await recordSimpleTutorExchange({
+          conversationId: conversation.id,
+          studentMessage: message,
+          replyText,
+          sourceType: "social",
+        });
+        return reply.send({ mode: "template", reply: replyText });
+      }
+
+      // Intent classification now runs for every conversation, not just
+      // "general" ones - a 'question' ("explain this quiz answer") chat
+      // used to skip this entirely, on the reasoning that its whole point
+      // is one specific wrong answer and there was no ambiguity to
+      // resolve. Confirmed with the user 9 September 2026 that Study
+      // Buddy should "manage all kinds of questions" regardless of which
+      // conversation it's in - a child asking for a joke or a hint
+      // mid-explanation should get one, not the academic honest-fallback
+      // reply. See tutorIntent.ts.
+      {
         const pendingItem = await getPendingFunContent(conversation.id);
         const intent = await classifyTutorIntent(
           message,
@@ -372,6 +407,16 @@ export async function tutorRoutes(app: FastifyInstance) {
         }
         // intent.kind === "academic" falls through to the existing
         // retrieval -> generation pipeline below, unchanged.
+      }
+
+      // Only now, once a message has actually been classified as
+      // academic (the one path that can call Gemini for a real answer),
+      // does the cost-focused daily cap apply - see tutorBudget.ts's
+      // checkDailyCap doc comment for the full reasoning on why this
+      // moved from an upfront check to here.
+      const dailyCap = await checkDailyCap(conversation.profileId);
+      if (!dailyCap.allowed) {
+        return reply.send({ mode: "blocked", reason: "daily_cap_reached", reply: DAILY_CAP_REPLY });
       }
 
       const retrieval =
