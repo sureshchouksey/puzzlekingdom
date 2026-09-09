@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { subjects, classes, profiles, questions, documents, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
+import { gradeAnswer, starsForPercent } from "../lib/scoring.js";
 
 const DEFAULT_STAGE_SIZE = 10;
 // A stage must score at least this fraction correct to count as
@@ -169,7 +170,10 @@ export async function quizRoutes(app: FastifyInstance) {
   // double-counted, so a duplicate click (or a caller that resends every
   // answer in one call, as the old one-shot API did) can't inflate the
   // score or the stage count.
-  app.post<{ Params: { id: string }; Body: { answers?: { questionId: string; selectedOptionId: string }[] } }>(
+  app.post<{
+    Params: { id: string };
+    Body: { answers?: { questionId: string; selectedOptionId?: string; selectedPayload?: unknown }[] };
+  }>(
     "/quizzes/:id/submit",
     async (request, reply) => {
       const { id } = request.params;
@@ -195,11 +199,15 @@ export async function quizRoutes(app: FastifyInstance) {
 
       // Grade the newly-submitted answers in memory first - nothing is
       // written to the database yet, since whether they get persisted at
-      // all depends on the pass/fail check below.
+      // all depends on the pass/fail check below. Branches by
+      // question_type (gradeAnswer, lib/scoring.ts) instead of assuming
+      // every question is a binary MCQ right/wrong.
       const newGraded: {
         questionId: string;
-        selectedOptionId: string;
+        selectedOptionId: string | null;
+        selectedPayload: unknown;
         isCorrect: boolean;
+        score: number | null;
         questionText: string;
         options: unknown;
         correctOptionId: string;
@@ -215,11 +223,13 @@ export async function quizRoutes(app: FastifyInstance) {
         for (const a of newAnswers) {
           const question = byId.get(a.questionId);
           if (!question) continue;
-          const isCorrect = question.correctOptionId === a.selectedOptionId;
+          const { isCorrect, score } = gradeAnswer(question, a);
           newGraded.push({
             questionId: a.questionId,
-            selectedOptionId: a.selectedOptionId,
+            selectedOptionId: a.selectedOptionId ?? null,
+            selectedPayload: a.selectedPayload ?? null,
             isCorrect,
+            score,
             questionText: question.questionText,
             options: question.options,
             correctOptionId: question.correctOptionId,
@@ -229,12 +239,23 @@ export async function quizRoutes(app: FastifyInstance) {
         }
       }
 
-      const newCorrect = newGraded.filter((g) => g.isCorrect).length;
+      // Sum of `score`, not a count of `isCorrect` - identical to the old
+      // boolean-count behavior for mcq/true_false (score is always
+      // exactly 1 or 0 there), but now also carries match_column's
+      // fractional partial credit. short_answer/long_answer questions
+      // have score === null and are excluded from both the sum and the
+      // count entirely, per "Scoring-engine impact" in
+      // Question-Types-and-Content-Authoring-Plan.md - a stage made up
+      // only of excluded questions has nothing to score and is treated
+      // as passed.
+      const scoredGraded = newGraded.filter((g) => g.score !== null);
+      const newScoreSum = scoredGraded.reduce((sum, g) => sum + (g.score ?? 0), 0);
+      const stagePercent = scoredGraded.length === 0 ? 1 : newScoreSum / scoredGraded.length;
       // A resubmission where every id was already recorded (nothing new to
       // grade) isn't a fresh attempt at the stage - treat it as passing so
       // it falls through to the normal "already cleared" response below,
       // same as before this cutoff existed.
-      const stagePassed = newAnswers.length === 0 ? true : newCorrect / newAnswers.length >= STAGE_PASS_THRESHOLD;
+      const stagePassed = newAnswers.length === 0 ? true : stagePercent >= STAGE_PASS_THRESHOLD;
 
       if (newGraded.length > 0 && stagePassed) {
         await db.insert(quizAttemptAnswers).values(
@@ -242,7 +263,9 @@ export async function quizRoutes(app: FastifyInstance) {
             attemptId: id,
             questionId: g.questionId,
             selectedOptionId: g.selectedOptionId,
+            selectedPayload: g.selectedPayload,
             isCorrect: g.isCorrect,
+            score: g.score,
           }))
         );
       }
@@ -265,10 +288,12 @@ export async function quizRoutes(app: FastifyInstance) {
               questionText: g.questionText,
               options: g.options,
               selectedOptionId: g.selectedOptionId,
+              selectedPayload: g.selectedPayload,
               correctOptionId: g.correctOptionId,
               explanation: g.explanation,
               tip: g.tip,
               isCorrect: g.isCorrect,
+              score: g.score,
             },
           ];
         });
@@ -277,8 +302,10 @@ export async function quizRoutes(app: FastifyInstance) {
           attemptId: id,
           stagesCleared: attempt.stagesCleared,
           totalStages,
-          stageScore: newCorrect,
+          stageScore: newScoreSum,
           stageTotal: newAnswers.length,
+          scoredTotal: scoredGraded.length,
+          stars: 0,
           isComplete: false,
           passed: false,
           passThreshold: STAGE_PASS_THRESHOLD,
@@ -299,7 +326,9 @@ export async function quizRoutes(app: FastifyInstance) {
         .select({
           questionId: quizAttemptAnswers.questionId,
           selectedOptionId: quizAttemptAnswers.selectedOptionId,
+          selectedPayload: quizAttemptAnswers.selectedPayload,
           isCorrect: quizAttemptAnswers.isCorrect,
+          score: quizAttemptAnswers.score,
           questionText: questions.questionText,
           options: questions.options,
           correctOptionId: questions.correctOptionId,
@@ -310,7 +339,14 @@ export async function quizRoutes(app: FastifyInstance) {
         .innerJoin(questions, eq(quizAttemptAnswers.questionId, questions.id))
         .where(and(eq(quizAttemptAnswers.attemptId, id), inArray(quizAttemptAnswers.questionId, answers.map((a) => a.questionId))));
       const stageAnswerById = new Map(stageAnswerRows.map((r) => [r.questionId, r]));
-      const stageCorrect = stageAnswerRows.filter((r) => r.isCorrect).length;
+      // The authoritative percentage for THIS stage's star award - built
+      // from every recorded row for this stage's question ids (not just
+      // newGraded above), so a stage submitted across more than one call
+      // still gets scored on its real, full percentage.
+      const stageScoredRows = stageAnswerRows.filter((r) => r.score !== null);
+      const stageScoreSum = stageScoredRows.reduce((sum, r) => sum + (r.score ?? 0), 0);
+      const stagePercentForStars = stageScoredRows.length === 0 ? 1 : stageScoreSum / stageScoredRows.length;
+      const stageStars = starsForPercent(stagePercentForStars);
       // Reordered to match the order this stage's answers were submitted
       // in (the same order the player saw them), not whatever order the
       // DB happened to return.
@@ -323,22 +359,29 @@ export async function quizRoutes(app: FastifyInstance) {
             questionText: r.questionText,
             options: r.options,
             selectedOptionId: r.selectedOptionId,
+            selectedPayload: r.selectedPayload,
             correctOptionId: r.correctOptionId,
             explanation: r.explanation,
             tip: !r.isCorrect ? r.tip : null,
             isCorrect: r.isCorrect,
+            score: r.score,
           },
         ];
       });
 
       if (!isComplete) {
-        await db.update(quizAttempts).set({ stagesCleared }).where(eq(quizAttempts.id, id));
+        await db
+          .update(quizAttempts)
+          .set({ stagesCleared, starsEarned: attempt.starsEarned + stageStars })
+          .where(eq(quizAttempts.id, id));
         return reply.send({
           attemptId: id,
           stagesCleared,
           totalStages,
-          stageScore: stageCorrect,
+          stageScore: stageScoreSum,
           stageTotal: answers.length,
+          scoredTotal: stageScoredRows.length,
+          stars: stageStars,
           isComplete: false,
           passed: true,
           passThreshold: STAGE_PASS_THRESHOLD,
@@ -353,26 +396,42 @@ export async function quizRoutes(app: FastifyInstance) {
       const allAnswers = await db
         .select({
           isCorrect: quizAttemptAnswers.isCorrect,
+          score: quizAttemptAnswers.score,
           topics: questions.topics,
         })
         .from(quizAttemptAnswers)
         .innerJoin(questions, eq(quizAttemptAnswers.questionId, questions.id))
         .where(eq(quizAttemptAnswers.attemptId, id));
 
-      const score = allAnswers.filter((a) => a.isCorrect).length;
+      // Rounded rather than fractional - quiz_attempts.score is an
+      // integer column and, today, every recorded answer's score is
+      // exactly 0 or 1 (no match_column content exists yet - see
+      // Question-Types-and-Content-Authoring-Plan.md build order steps
+      // 7-8), so this rounding is a no-op in practice. Worth revisiting
+      // once match-column questions actually ship.
+      const scoreSum = allAnswers.filter((a) => a.score !== null).reduce((sum, a) => sum + (a.score ?? 0), 0);
+      const score = Math.round(scoreSum);
       const topicBreakdown = buildTopicBreakdown(allAnswers);
 
       await db
         .update(quizAttempts)
-        .set({ completedAt: new Date(), score, topicBreakdown, stagesCleared: totalStages })
+        .set({
+          completedAt: new Date(),
+          score,
+          topicBreakdown,
+          stagesCleared: totalStages,
+          starsEarned: attempt.starsEarned + stageStars,
+        })
         .where(eq(quizAttempts.id, id));
 
       return reply.send({
         attemptId: id,
         stagesCleared: totalStages,
         totalStages,
-        stageScore: stageCorrect,
+        stageScore: stageScoreSum,
         stageTotal: answers.length,
+        scoredTotal: stageScoredRows.length,
+        stars: stageStars,
         isComplete: true,
         passed: true,
         passThreshold: STAGE_PASS_THRESHOLD,

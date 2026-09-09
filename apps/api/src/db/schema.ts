@@ -175,14 +175,36 @@ export const quizAttempts = pgTable("quiz_attempts", {
   // topics are edited later, and so /reports can aggregate cheaply across
   // many attempts. Null until the attempt is submitted.
   topicBreakdown: jsonb("topic_breakdown").$type<Record<string, { correct: number; total: number }>>(),
+  // Running total across this attempt's stages, incremented as each is
+  // scored (see the star bands in
+  // Question-Types-and-Content-Authoring-Plan.md, layered on top of the
+  // existing stage pass gate). Summed per profile once the leaderboard
+  // switches to a stars-based ranking (build order step 6) - not read
+  // anywhere yet.
+  starsEarned: integer("stars_earned").notNull().default(0),
 });
 
 export const quizAttemptAnswers = pgTable("quiz_attempt_answers", {
   id: uuid("id").primaryKey().defaultRandom(),
   attemptId: uuid("attempt_id").notNull().references(() => quizAttempts.id),
   questionId: uuid("question_id").notNull().references(() => questions.id, { onDelete: "cascade" }),
-  selectedOptionId: text("selected_option_id").notNull(),
+  // Only set for mcq/true_false - every other question_type submits
+  // selectedPayload instead (see schema comment there).
+  selectedOptionId: text("selected_option_id"),
+  // The submitted answer for every type other than mcq/true_false: a
+  // typed-in string for fill_blank/missing_number/missing_spelling/
+  // short_answer/long_answer ({ text: string }), or match_column's picked
+  // pairs ({ pairs: [leftIdx, rightIdx][] }).
+  selectedPayload: jsonb("selected_payload"),
   isCorrect: boolean("is_correct").notNull(),
+  // What actually gets summed for a stage's pass/fail percentage instead
+  // of counting isCorrect booleans: 1 or 0 for the binary types (always
+  // equal to isCorrect, so today's all-MCQ data behaves exactly as
+  // before), a fraction for match_column's partial credit, and null for
+  // short/long answer - excluded from the stage total entirely rather
+  // than counted as a 0 (see "Scoring-engine impact" in
+  // Question-Types-and-Content-Authoring-Plan.md).
+  score: real("score"),
 });
 
 // The "how do you actually solve this kind of problem" method/formula
