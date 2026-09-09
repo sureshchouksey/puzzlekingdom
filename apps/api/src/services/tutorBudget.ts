@@ -64,14 +64,31 @@ export type BudgetCheck =
   | { allowed: false; reason: "daily_cap_reached"; cap: number; usedToday: number };
 
 /**
- * Call this BEFORE generateTutorReply. Counts today's student messages
- * for this profile (UTC calendar day - a real per-timezone "today" isn't
- * worth the complexity for a 30/day cap) against the admin-configured
- * cap, and separately checks the tutor's own on/off toggle. Deliberately
- * counts every student message, not just ones that triggered a real
- * Gemini call - the cap is a usage limit on the child's own chat, not
- * purely a cost control (Section 6 draws that same distinction between
- * the per-profile cap and the cost-focused shared budget).
+ * Call this BEFORE generateTutorReply. Counts today's genuinely
+ * Gemini-answered academic exchanges for this profile (UTC calendar day -
+ * a real per-timezone "today" isn't worth the complexity for a 30/day
+ * cap) against the admin-configured cap, and separately checks the
+ * tutor's own on/off toggle.
+ *
+ * Revisited 9 September 2026, from the original "count every student
+ * message" behaviour: with fun content (riddles/jokes/tongue twisters/
+ * puzzles/trivia, hints included) served entirely from Postgres and
+ * intent classification degrading to a free keyword heuristic whenever
+ * Gemini is unreachable (tutorIntent.ts), counting every message meant a
+ * child could hit "you've used up your chats for today" from riddles and
+ * greetings alone, without a single real Gemini call ever having
+ * happened - not what the cap is actually meant to protect against. The
+ * cap is now a pure cost control matching Section 6/9's framing (the same
+ * "cost-focused" reasoning the shared daily budget already uses): it only
+ * counts an 'agent' message whose matched_source_type is 'question' or
+ * 'concept_guide' - recordTutorExchange below only ever sets one of those
+ * two when generateTutorReply's reply.mode was actually "ai" (a real,
+ * successful Gemini call), logging 'none' otherwise (no retrieval match,
+ * or Gemini itself failed and it fell back to TEMPLATE_FALLBACK_REPLY).
+ * A greeting/thanks/fun_request/reveal_answer/hint_request/answer_attempt
+ * turn (recordSimpleTutorExchange) never sets either of those two values,
+ * so none of those count here either, regardless of whether Gemini's key
+ * happens to be working.
  */
 export async function checkTutorBudget(profileId: string): Promise<BudgetCheck> {
   const settings = await getAppSettings();
@@ -84,7 +101,8 @@ export async function checkTutorBudget(profileId: string): Promise<BudgetCheck> 
     from tutor_messages tm
     join tutor_conversations tc on tc.id = tm.conversation_id
     where tc.profile_id = ${profileId}
-      and tm.role = 'student'
+      and tm.role = 'agent'
+      and tm.matched_source_type in ('question', 'concept_guide')
       and tm.created_at >= date_trunc('day', now())
   `);
   const usedToday = Number((rows[0] as unknown as { count: number } | undefined)?.count ?? 0);
