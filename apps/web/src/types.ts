@@ -369,10 +369,13 @@ export type TutorTranscript = {
 };
 
 // What POST /tutor/conversations/:id/messages actually returns for one
-// student message: "ai"/"template" are real replies (grounded vs. honest
-// fallback - see tutorGeneration.ts), "blocked" means the budget check
-// stopped it before retrieval/generation ever ran (see `reason`).
-export type TutorMessageMode = "ai" | "template" | "blocked";
+// student message: "ai" is a real Gemini-generated reply, "grounded" is
+// real matched content (a concept guide or question explanation) served
+// directly because Gemini itself failed, "template" is the honest "I
+// don't know" fallback for a genuine non-match - see tutorGeneration.ts
+// for all three. "blocked" means the budget/toggle check stopped the
+// message before retrieval/generation ever ran (see `reason`).
+export type TutorMessageMode = "ai" | "template" | "grounded" | "blocked";
 
 export type TutorMessageResponse = {
   mode: TutorMessageMode;

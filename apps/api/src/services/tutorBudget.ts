@@ -96,8 +96,12 @@ export type DailyCapCheck = { allowed: true } | { allowed: false; cap: number; u
  * 'agent' message whose matched_source_type is 'question' or
  * 'concept_guide' - recordTutorExchange below only ever sets one of those
  * two when generateTutorReply's reply.mode was actually "ai" (a real,
- * successful Gemini call), logging 'none' otherwise (no retrieval match,
- * or Gemini itself failed and it fell back to TEMPLATE_FALLBACK_REPLY). A
+ * successful Gemini call), logging 'none' otherwise: whether that's a
+ * genuine "nothing matched" (mode "template") or a real match served
+ * straight from the database because Gemini itself failed (mode
+ * "grounded", added 9 September 2026 - see tutorGeneration.ts's
+ * formatGroundedReply), neither one made a real Gemini call, so neither
+ * should count here either. A
  * greeting/thanks/fun_request/reveal_answer/hint_request/answer_attempt
  * turn (recordSimpleTutorExchange) never sets either of those two values,
  * so none of those count here either, regardless of whether Gemini's key

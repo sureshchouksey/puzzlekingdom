@@ -22,26 +22,29 @@ import type { RetrievalResult, RetrievedSource } from "./tutorRetrieval.js";
 // story (Section 6) depends on staying on a genuinely free tier no matter
 // what model question-generation is configured to use.
 
-export type TutorReplyMode = "ai" | "template";
+export type TutorReplyMode = "ai" | "template" | "grounded";
 
 export interface TutorReply {
   mode: TutorReplyMode;
-  reply: string;
-  // Source ids actually handed to the model as grounding material - empty
-  // for a template reply. Shaped to drop straight into tutor_messages'
+  // Source ids actually handed to the model as grounding material for an
+  // "ai" reply (every retrieved source), the single top source for a
+  // "grounded" reply (see formatGroundedReply below), or empty for a
+  // "template" reply. Shaped to drop straight into tutor_messages'
   // matched_source_type/matched_source_id columns once that table exists
   // (Section 8), the same way RetrievedSource already is.
+  reply: string;
   groundedSourceIds: string[];
 }
 
 // The refuse-rather-than-guess fallback from Section 2, decision 1. Used
-// whenever retrieval found nothing relevant (RetrievalResult.matched ===
-// false) - deliberately WITHOUT calling Gemini at all, both because there's
-// nothing real to ground a reply in, and because every skipped call is a
-// call that doesn't count against the free tier's daily quota (Section 6).
-// Also the graceful-degradation reply if Gemini itself fails after retries
-// (see generateTutorReply) - a real error should never surface to a child
-// as a broken chat bubble.
+// only when retrieval found nothing relevant at all (RetrievalResult
+// .matched === false) - deliberately WITHOUT calling Gemini, both because
+// there's nothing real to ground a reply in, and because every skipped
+// call is a call that doesn't count against the free tier's daily quota
+// (Section 6). NOT used anymore when retrieval DID find something but
+// Gemini itself failed - see formatGroundedReply/generateTutorReply below,
+// updated 9 September 2026: a genuine match should never be thrown away
+// just because there's no LLM available to rephrase it.
 export const TEMPLATE_FALLBACK_REPLY =
   "I don't know about that yet! I'm still learning, and I can only really help with things " +
   "from your Puzzle Kingdom lessons and quizzes. Try asking me about something you've been " +
@@ -108,6 +111,25 @@ function describeSource(source: RetrievedSource): string {
     .join("\n");
 }
 
+// The child-facing sibling of describeSource above: describeSource labels
+// a source for Gemini's own context window ("[Concept guide: ...]"),
+// this formats one plainly enough to show a child directly, for when
+// there's no working Gemini call to rephrase it through (see
+// generateTutorReply's catch block below). Only ever called with
+// retrieval.sources[0] - the single best match - matching how
+// recordTutorExchange (tutorBudget.ts) already only logs the top source,
+// not the full list.
+function formatGroundedReply(source: RetrievedSource): string {
+  if (source.type === "concept_guide") {
+    return [`Here's what I know about ${source.title}:`, source.methodText, source.formula]
+      .filter((part): part is string => Boolean(part))
+      .join("\n\n");
+  }
+  return ["Here's an explanation that might help:", source.explanation, source.tip ? `Tip: ${source.tip}` : null]
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+}
+
 function buildUserContent(queryText: string, sources: RetrievedSource[]): string {
   const material = sources.map(describeSource).join("\n\n");
   return [
@@ -151,12 +173,24 @@ async function callGemini(queryText: string, sources: RetrievedSource[]): Promis
 
 /**
  * The one entry point this module exposes. Never throws - a Gemini failure
- * (exhausted retries, malformed response, anything) degrades to the same
- * honest template fallback as a genuine "nothing matched", rather than
- * letting a child-facing chat request 500. The caller route (Section 9)
- * should still log which mode was actually served, since an unusually high
- * rate of AI-mode failures is worth knowing about even though the user
- * experience stays graceful.
+ * (no working API key, exhausted retries, malformed response, anything)
+ * never lets a child-facing chat request 500.
+ *
+ * Revisited 9 September 2026: a Gemini failure used to degrade all the way
+ * to TEMPLATE_FALLBACK_REPLY - the same "I don't know about that yet" line
+ * as a genuine "nothing matched" - even when retrieval HAD found real,
+ * relevant content (e.g. "Additions of 3 digits?" correctly matching the
+ * Year 3 "Addition & Subtraction" concept guide). That's misleading: the
+ * app genuinely does know something here, it just couldn't get an LLM to
+ * rephrase it. Now a matched-but-Gemini-failed reply serves that real
+ * content directly instead (mode: "grounded", formatGroundedReply above) -
+ * still without ever calling Gemini for a genuine non-match, and still
+ * never counted toward the daily cap (tutorBudget.ts's recordTutorExchange
+ * only logs a countable matched_source_type for mode "ai", by design - a
+ * "grounded" reply cost nothing, so it shouldn't count either). The caller
+ * route (Section 9) should still log which mode was actually served, since
+ * an unusually high rate of "grounded" replies is worth knowing about even
+ * though the user experience stays graceful either way.
  */
 export async function generateTutorReply(params: {
   queryText: string;
@@ -176,7 +210,11 @@ export async function generateTutorReply(params: {
       groundedSourceIds: retrieval.sources.map((s) => s.id),
     };
   } catch (err) {
-    console.error("Gemini tutor generation failed after retries - falling back to template reply:", err);
-    return { mode: "template", reply: TEMPLATE_FALLBACK_REPLY, groundedSourceIds: [] };
+    console.error(
+      "Gemini tutor generation failed after retries - falling back to the matched content directly (mode: grounded):",
+      err
+    );
+    const topSource = retrieval.sources[0];
+    return { mode: "grounded", reply: formatGroundedReply(topSource), groundedSourceIds: [topSource.id] };
   }
 }

@@ -373,9 +373,9 @@ export function startTutorConversation(params: {
 }
 
 // One chat turn - the reply already reflects budget/toggle enforcement
-// (mode: "blocked") as well as grounded vs. honest-fallback replies
-// (mode: "ai" | "template") - see tutor.ts's own comments for what each
-// mode means and why they're kept distinct.
+// (mode: "blocked") as well as real vs. honest-fallback replies
+// (mode: "ai" | "grounded" | "template") - see tutor.ts's own comments
+// for what each mode means and why they're kept distinct.
 export function sendTutorMessage(conversationId: string, message: string): Promise<TutorMessageResponse> {
   return apiFetch(`/tutor/conversations/${conversationId}/messages`, {
     method: "POST",
