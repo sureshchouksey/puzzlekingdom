@@ -4,9 +4,9 @@ import { assembleQuiz, getResults } from "../api";
 import type { AssembleQuizResponse, Profile, QuestJourney, QuizResults, ResultsAnswer, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
 
-// Same single-stage sentinel SubjectPicker.tsx uses for "All subjects"
-// journeys - the API clamps it down to however many questions the next
-// topic actually has, so it always comes back as exactly one stage.
+// Same single-stage sentinel SubjectPicker.tsx uses for a Quest Journey -
+// the API clamps it down to however many questions the next topic
+// actually has, so it always comes back as exactly one stage.
 const ALL_SUBJECTS_STAGE_SIZE = 9999;
 
 // Same grouping approach as the Quiz screen: show each passage once, right
@@ -36,9 +36,9 @@ export function Results({
   onExplain,
 }: {
   attemptId: string;
-  // Only set when this attempt was one stop on an "All subjects" quest
-  // journey (see SubjectPicker.tsx) - lets this screen offer "Next quest"
-  // straight into the next topic instead of just "Play again".
+  // Only set when this attempt was one stop on a Quest Journey (see
+  // SubjectPicker.tsx) - lets this screen offer "Next quest" straight into
+  // the next topic instead of just "Play again".
   journey?: QuestJourney;
   profile: Profile;
   onQuizReady: (quiz: AssembleQuizResponse, journey?: QuestJourney) => void;

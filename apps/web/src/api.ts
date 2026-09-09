@@ -212,6 +212,29 @@ export function assembleQuiz(params: {
   }).then((res) => asJson(res));
 }
 
+// Every not-yet-completed attempt for one profile+subject(+class), most
+// recently started first - used by SubjectPicker's "Topic Practice" list
+// to show "Continue - stage X of Y" instead of "Start" on any topic (or
+// the no-filter "mixed practice" option, keyed by topic: null) the player
+// left mid-quiz.
+export function getQuizInProgress(params: { profileId: string; subjectName: string; classId?: string }): Promise<
+  { attemptId: string; topic: string | null; stagesCleared: number; totalStages: number }[]
+> {
+  return apiFetch(`/quizzes/in-progress${buildQuery(params)}`).then((res) => asJson(res));
+}
+
+// Picks up the most recent in-progress attempt for this profile+subject
+// (+class)(+topic) exactly where it left off - same response shape as
+// assembleQuiz, plus stagesCleared so the Quiz screen can skip straight
+// past whatever stages are already cleared instead of restarting at
+// stage 1. 404s if there's nothing to resume (caller should fall back to
+// assembleQuiz in that case).
+export function resumeQuiz(params: { profileId: string; subjectName: string; classId?: string; topic?: string }): Promise<
+  AssembleQuizResponse & { stagesCleared: number }
+> {
+  return apiFetch(`/quizzes/resume${buildQuery(params)}`).then((res) => asJson(res));
+}
+
 // Submits one stage's worth of answers at a time, not necessarily the
 // whole quiz - see SubmitStageResponse. Call again with the next stage's
 // answers to continue; the response says whether the attempt is complete.

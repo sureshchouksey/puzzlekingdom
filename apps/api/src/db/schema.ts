@@ -117,6 +117,16 @@ export const quizAttempts = pgTable("quiz_attempts", {
   // partway through still credits whatever stages were actually cleared -
   // this is what the leaderboard sums per profile.
   stagesCleared: integer("stages_cleared").notNull().default(0),
+  // The topic filter (if any) this attempt was assembled with - null
+  // means no topic filter ("all topics mixed"). Recorded purely so an
+  // incomplete attempt can be found again by GET /quizzes/resume when the
+  // player comes back to the same subject+topic later.
+  topic: text("topic"),
+  // The exact, ordered set of question ids picked at assembly time -
+  // needed to rebuild the identical stage grouping on resume, since a
+  // fresh /quizzes call would pick a new random set that no longer lines
+  // up with quiz_attempt_answers already recorded against this attempt.
+  questionIds: jsonb("question_ids").$type<string[]>(),
   // A snapshot, computed once at submit time, of accuracy per topic for
   // this one attempt: { "Fractions, Decimals & Percentages": { correct: 3,
   // total: 5 }, ... }. A question with more than one topic tag contributes

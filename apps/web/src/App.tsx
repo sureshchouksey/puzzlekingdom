@@ -18,7 +18,7 @@ type Screen =
   | { name: "home" }
   | { name: "classPicker" }
   | { name: "subjectPicker"; pkClass: PkClass }
-  // journey is set only for an "All subjects" quest - Results.tsx uses it
+  // journey is set only for a Quest Journey quiz - Results.tsx uses it
   // to jump straight into the next topic without returning to SubjectPicker.
   | { name: "quiz"; quiz: AssembleQuizResponse; journey?: QuestJourney }
   | { name: "results"; attemptId: string; journey?: QuestJourney }

@@ -54,18 +54,23 @@ export type AssembleQuizResponse = {
   // using these two numbers, matching how the backend counts stages.
   stageSize: number;
   totalStages: number;
+  // Only set when this quiz came back from resumeQuiz() (api.ts) rather
+  // than assembleQuiz() - how many stages were already cleared on a
+  // previous visit, so Quiz.tsx can skip straight past them instead of
+  // restarting at stage 1. Undefined (treated as 0) for a fresh quiz.
+  stagesCleared?: number;
   questions: QuizQuestion[];
 };
 
-// One step in an "All subjects" quest journey - a single subject+topic
-// pair the player can play as an isolated, single-stage quiz. Built
-// client-side in SubjectPicker.tsx from getTopics/getTopicReports across
-// every subject in the class; nothing new is stored on the backend.
+// One step in a "Quest Journey" - a single subject+topic pair the
+// player can play as an isolated, single-stage quiz. Built client-side
+// in SubjectPicker.tsx from getTopics/getTopicReports; nothing new is
+// stored on the backend for this part.
 export type QuestJourneyItem = { subjectName: string; topic: string };
 
-// Tracks progress through an "All subjects" journey across the Quiz and
-// Results screens, so Results can offer "next quest" and jump straight
-// into the next topic's quiz without routing back through SubjectPicker.
+// Tracks progress through a Quest Journey across the Quiz and Results
+// screens, so Results can offer "next quest" and jump straight into the
+// next topic's quiz without routing back through SubjectPicker.
 export type QuestJourney = {
   pkClass: PkClass;
   items: QuestJourneyItem[];

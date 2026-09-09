@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { subjects, classes, profiles, questions, documents, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
 
@@ -119,6 +119,8 @@ export async function quizRoutes(app: FastifyInstance) {
         profileId: profileId ?? undefined,
         totalQuestions: picked.length,
         stageSize,
+        topic: topic ?? null,
+        questionIds: picked.map((q) => q.id),
       })
       .returning();
 
@@ -147,6 +149,125 @@ export async function quizRoutes(app: FastifyInstance) {
       })),
     });
   });
+
+  // Every not-yet-completed attempt for one profile+subject(+class), most
+  // recently started first - lets SubjectPicker's Topic Practice list show
+  // "Continue" instead of "Start" on any topic (or the no-filter "mixed
+  // practice" option, keyed by topic: null) the player left mid-quiz,
+  // without a separate round-trip per topic.
+  app.get<{ Querystring: { profileId?: string; subjectName?: string; classId?: string } }>(
+    "/quizzes/in-progress",
+    async (request, reply) => {
+      const { profileId, subjectName, classId } = request.query;
+      if (!profileId) return reply.status(400).send({ error: "profileId is required" });
+      if (!subjectName) return reply.status(400).send({ error: "subjectName is required" });
+
+      const [subject] = await db.select().from(subjects).where(eq(subjects.name, subjectName)).limit(1);
+      if (!subject) return reply.status(404).send({ error: `No subject named "${subjectName}"` });
+
+      const conditions = [
+        eq(quizAttempts.profileId, profileId),
+        eq(quizAttempts.subjectId, subject.id),
+        sql`${quizAttempts.completedAt} is null`,
+      ];
+      if (classId) conditions.push(sql`${quizAttempts.classId} is not distinct from ${classId}`);
+
+      const rows = await db
+        .select({
+          attemptId: quizAttempts.id,
+          topic: quizAttempts.topic,
+          stagesCleared: quizAttempts.stagesCleared,
+          stageSize: quizAttempts.stageSize,
+          totalQuestions: quizAttempts.totalQuestions,
+        })
+        .from(quizAttempts)
+        .where(and(...conditions))
+        .orderBy(desc(quizAttempts.startedAt));
+
+      return rows.map((r) => ({
+        attemptId: r.attemptId,
+        topic: r.topic,
+        stagesCleared: r.stagesCleared,
+        totalStages: Math.ceil(r.totalQuestions / r.stageSize),
+      }));
+    }
+  );
+
+  // Find an in-progress (not yet completed) attempt for this
+  // profile+subject(+class)(+topic) combination, so a player who
+  // navigated away mid-quiz can pick up the exact same questions and
+  // stage they left off at, instead of starting over. Matches on the
+  // attempt's saved `topic` and `classId` with SQL's "is not distinct
+  // from" so an unfiltered quiz (topic/classId both null) only resumes
+  // another unfiltered quiz, never a topic- or class-filtered one (and
+  // vice versa). Returns the most recently started match, if any.
+  app.get<{ Querystring: { profileId?: string; subjectName?: string; classId?: string; topic?: string } }>(
+    "/quizzes/resume",
+    async (request, reply) => {
+      const { profileId, subjectName, classId, topic } = request.query;
+      if (!profileId) return reply.status(400).send({ error: "profileId is required" });
+      if (!subjectName) return reply.status(400).send({ error: "subjectName is required" });
+
+      const [subject] = await db.select().from(subjects).where(eq(subjects.name, subjectName)).limit(1);
+      if (!subject) return reply.status(404).send({ error: `No subject named "${subjectName}"` });
+
+      const [attempt] = await db
+        .select()
+        .from(quizAttempts)
+        .where(
+          and(
+            eq(quizAttempts.profileId, profileId),
+            eq(quizAttempts.subjectId, subject.id),
+            sql`${quizAttempts.completedAt} is null`,
+            sql`${quizAttempts.topic} is not distinct from ${topic ?? null}`,
+            sql`${quizAttempts.classId} is not distinct from ${classId ?? null}`
+          )
+        )
+        .orderBy(desc(quizAttempts.startedAt))
+        .limit(1);
+
+      if (!attempt || !attempt.questionIds || attempt.questionIds.length === 0) {
+        return reply.status(404).send({ error: "No in-progress attempt to resume" });
+      }
+
+      // Re-fetch the exact same questions this attempt was assembled
+      // with, then restore their original order - not whatever order the
+      // IN (...) query happens to return - so stage grouping lines up
+      // identically with the quiz_attempt_answers rows already recorded.
+      const rows = await db
+        .select({
+          id: questions.id,
+          questionText: questions.questionText,
+          options: questions.options,
+          documentId: questions.documentId,
+          passage: documents.passage,
+          topics: questions.topics,
+        })
+        .from(questions)
+        .innerJoin(documents, eq(questions.documentId, documents.id))
+        .where(inArray(questions.id, attempt.questionIds));
+      const byId = new Map(rows.map((q) => [q.id, q]));
+      const orderedQuestions = attempt.questionIds.map((id) => byId.get(id)).filter((q): q is (typeof rows)[number] => !!q);
+
+      return reply.send({
+        attemptId: attempt.id,
+        subjectName: subject.name,
+        subjectId: subject.id,
+        classId: attempt.classId ?? null,
+        stageSize: attempt.stageSize,
+        totalStages: Math.ceil(attempt.totalQuestions / attempt.stageSize),
+        stagesCleared: attempt.stagesCleared,
+        questions: orderedQuestions.map((q) => ({
+          id: q.id,
+          questionText: q.questionText,
+          options: shuffled(q.options),
+          documentId: q.documentId,
+          passage: q.passage,
+          topics: q.topics,
+        })),
+      });
+    }
+  );
 
   // Score one stage's worth of answers at a time - NOT necessarily the
   // whole quiz in one call. A quiz-taker finishes a stage (say, 5

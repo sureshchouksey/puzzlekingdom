@@ -7,13 +7,15 @@ import {
   Castle,
   Check,
   Compass,
+  ListChecks,
   Lock,
   Palette,
   Play,
+  Shuffle,
   Sparkles,
   Star,
 } from "lucide-react";
-import { assembleQuiz, getClassSubjects, getTopicReports, getTopics } from "../api";
+import { assembleQuiz, getClassSubjects, getQuizInProgress, getTopicReports, getTopics, resumeQuiz } from "../api";
 import type {
   AssembleQuizResponse,
   PkClass,
@@ -25,19 +27,19 @@ import type {
 } from "../types";
 import { Button } from "../components/ui/button";
 
-// Every quiz clears a "stage" - a checkpoint partway through - every 10
-// questions. Not user-configurable: the number of stages is simply
-// however many groups of 10 the subject's question count makes. This
-// only applies when a player picks one subject (and optionally one
-// topic) directly - see ALL_SUBJECTS_STAGE_SIZE below for the other mode.
+// "Topic Practice" quizzes clear in stages of 10 questions, tracked and
+// resumable (see QuizInProgress below) - the "serious study" mode.
 const STAGE_SIZE = 10;
 
-// "All subjects" journeys run one topic at a time as a single, un-staged
+// "Quest Journey" quizzes run one topic at a time as a single, un-staged
 // quiz - so we ask the backend for a stage bigger than any topic's
 // question bank could be. The API clamps stageSize to the actual question
 // count (Math.min(requested, picked.length)), which collapses totalStages
-// to exactly 1 no matter how many questions the topic has.
-const ALL_SUBJECTS_STAGE_SIZE = 9999;
+// to exactly 1 no matter how many questions the topic has. A quest that's
+// abandoned before its one stage is submitted just stays "current" next
+// time (no partial credit to lose), so quests don't need the same
+// resume-by-attempt tracking Topic Practice does.
+const QUEST_STAGE_SIZE = 9999;
 
 // A topic counts as mastered at the same accuracy bar Reports.tsx uses for
 // its "emerald" (green) tier, so "quest complete" here means the same
@@ -84,12 +86,10 @@ function subjectVisual(name: string, index: number): { icon: typeof Calculator; 
 type NodeState = "completed" | "current" | "locked";
 type QuestNode = QuestJourneyItem & { state: NodeState; accuracy: number | null };
 
-// Turns an ordered subject+topic list into a Lovable-style quest path:
-// topics complete in order, one "current" quest unlocked at a time,
-// everything after it locked - driven by each topic's real saved
-// accuracy (buildTopicBreakdown on the API), not mock progress data.
-// Shared by both the single-subject quest map and the "All subjects"
-// journey - they only differ in which items/accuracy they pass in.
+// Turns an ordered topic list into a Lovable-style quest path: topics
+// complete in order, one "current" quest unlocked at a time, everything
+// after it locked - driven by each topic's real saved accuracy
+// (buildTopicBreakdown on the API), not mock progress data.
 function buildQuestNodes(items: QuestJourneyItem[], accuracyFor: (item: QuestJourneyItem) => number | null): QuestNode[] {
   let currentAssigned = false;
   return items.map((item) => {
@@ -112,6 +112,10 @@ function starsFor(accuracy: number | null): number {
   return 1;
 }
 
+type InProgress = { attemptId: string; topic: string | null; stagesCleared: number; totalStages: number };
+
+type Mode = "quest" | "practice";
+
 export function SubjectPicker({
   pkClass,
   profile,
@@ -121,23 +125,17 @@ export function SubjectPicker({
   pkClass: PkClass;
   profile: Profile;
   onBack: () => void;
-  // journey is only set for an "All subjects" quest - Results.tsx uses it
-  // to offer "next quest" and jump straight into the next topic.
+  // journey is only set for a Quest Journey quiz - Results.tsx uses it to
+  // offer "next quest" and jump straight into the next topic.
   onQuizReady: (quiz: AssembleQuizResponse, journey?: QuestJourney) => void;
 }) {
   const [subjects, setSubjects] = useState<Subject[] | null>(null);
-
-  // Single-subject mode.
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode | null>(null);
+
   const [topics, setTopics] = useState<string[] | null>(null);
   const [topicReports, setTopicReports] = useState<TopicReport[] | null>(null);
-
-  // "All subjects" mode: every subject's topics flattened into one
-  // ordered journey, with accuracy looked up by "subject::topic" so two
-  // subjects that happen to share a topic name don't collide.
-  const [allSubjectsMode, setAllSubjectsMode] = useState(false);
-  const [journeyItems, setJourneyItems] = useState<QuestJourneyItem[] | null>(null);
-  const [journeyAccuracy, setJourneyAccuracy] = useState<Map<string, number | null> | null>(null);
+  const [inProgress, setInProgress] = useState<InProgress[] | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,78 +146,46 @@ export function SubjectPicker({
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load subjects"));
   }, [pkClass.id]);
 
+  // Topics are needed by both modes, so fetch them as soon as a subject
+  // is picked, before the player has even chosen a mode.
   useEffect(() => {
     if (!selectedSubject) {
       setTopics(null);
-      setTopicReports(null);
       return;
     }
     setTopics(null);
-    setTopicReports(null);
-    Promise.all([
-      getTopics({ classId: pkClass.id, subjectName: selectedSubject }),
-      getTopicReports({ classId: pkClass.id, subjectName: selectedSubject }),
-    ])
-      .then(([t, r]) => {
-        setTopics(t);
-        setTopicReports(r);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load the quest map"));
+    getTopics({ classId: pkClass.id, subjectName: selectedSubject })
+      .then(setTopics)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load topics"));
   }, [pkClass.id, selectedSubject]);
 
+  // Quest Journey needs each topic's real accuracy to lay out the path.
   useEffect(() => {
-    if (!allSubjectsMode || !subjects) {
-      setJourneyItems(null);
-      setJourneyAccuracy(null);
+    if (!selectedSubject || mode !== "quest") {
+      setTopicReports(null);
       return;
     }
-    setJourneyItems(null);
-    setJourneyAccuracy(null);
-    Promise.all(
-      subjects.map((s) =>
-        Promise.all([
-          getTopics({ classId: pkClass.id, subjectName: s.name }),
-          getTopicReports({ classId: pkClass.id, subjectName: s.name }),
-        ]).then(([t, r]) => ({ subjectName: s.name, topics: t, reports: r }))
-      )
-    )
-      .then((bySubject) => {
-        const items: QuestJourneyItem[] = [];
-        const accuracy = new Map<string, number | null>();
-        for (const { subjectName, topics: subjectTopics, reports } of bySubject) {
-          for (const topic of subjectTopics) {
-            items.push({ subjectName, topic });
-            const report = reports.find((r) => r.topic === topic);
-            accuracy.set(`${subjectName}::${topic}`, report?.accuracy ?? null);
-          }
-        }
-        setJourneyItems(items);
-        setJourneyAccuracy(accuracy);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load the quest journey"));
-  }, [allSubjectsMode, subjects, pkClass.id]);
+    setTopicReports(null);
+    getTopicReports({ classId: pkClass.id, subjectName: selectedSubject })
+      .then(setTopicReports)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load the quest map"));
+  }, [pkClass.id, selectedSubject, mode]);
 
-  async function startQuiz(topic?: string) {
-    if (!selectedSubject) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const quiz = await assembleQuiz({
-        subjectName: selectedSubject,
-        classId: pkClass.id,
-        topic,
-        profileId: profile.id,
-        stageSize: STAGE_SIZE,
-      });
-      onQuizReady(quiz);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start quiz");
-    } finally {
-      setLoading(false);
+  // Topic Practice needs to know which topics (or "mixed practice", keyed
+  // null) already have an in-progress attempt, so it can offer "Continue"
+  // instead of "Start".
+  useEffect(() => {
+    if (!selectedSubject || mode !== "practice") {
+      setInProgress(null);
+      return;
     }
-  }
+    setInProgress(null);
+    getQuizInProgress({ profileId: profile.id, subjectName: selectedSubject, classId: pkClass.id })
+      .then(setInProgress)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to check for quizzes in progress"));
+  }, [pkClass.id, selectedSubject, mode, profile.id]);
 
-  async function startJourneyQuest(index: number, items: QuestJourneyItem[]) {
+  async function startQuest(index: number, items: QuestJourneyItem[]) {
     const item = items[index];
     if (!item) return;
     setLoading(true);
@@ -230,7 +196,7 @@ export function SubjectPicker({
         classId: pkClass.id,
         topic: item.topic,
         profileId: profile.id,
-        stageSize: ALL_SUBJECTS_STAGE_SIZE,
+        stageSize: QUEST_STAGE_SIZE,
       });
       onQuizReady(quiz, { pkClass, items, index });
     } catch (err) {
@@ -240,29 +206,61 @@ export function SubjectPicker({
     }
   }
 
-  const step: "subject" | "quest" = selectedSubject || allSubjectsMode ? "quest" : "subject";
-
-  function goBackFromQuest() {
-    setSelectedSubject(null);
-    setAllSubjectsMode(false);
+  async function startPractice(topic?: string) {
+    if (!selectedSubject) return;
+    setLoading(true);
+    setError(null);
+    const resumable = inProgress?.some((r) => r.topic === (topic ?? null));
+    try {
+      const quiz = resumable
+        ? await resumeQuiz({ profileId: profile.id, subjectName: selectedSubject, classId: pkClass.id, topic }).catch(() =>
+            assembleQuiz({
+              subjectName: selectedSubject,
+              classId: pkClass.id,
+              topic,
+              profileId: profile.id,
+              stageSize: STAGE_SIZE,
+            })
+          )
+        : await assembleQuiz({
+            subjectName: selectedSubject,
+            classId: pkClass.id,
+            topic,
+            profileId: profile.id,
+            stageSize: STAGE_SIZE,
+          });
+      onQuizReady(quiz);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start quiz");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  const singleJewel = selectedSubject ? subjectVisual(selectedSubject, subjects?.findIndex((s) => s.name === selectedSubject) ?? 0).jewel : "gold";
-  const overallJewel: Jewel = allSubjectsMode ? "gold" : singleJewel;
+  const step: "subject" | "mode" | "quest" | "practice" = !selectedSubject ? "subject" : !mode ? "mode" : mode;
 
-  const questNodes: QuestNode[] | null = allSubjectsMode
-    ? journeyItems && journeyAccuracy
-      ? buildQuestNodes(journeyItems, (item) => journeyAccuracy.get(`${item.subjectName}::${item.topic}`) ?? null)
-      : null
-    : topics && topicReports
+  function goBack() {
+    if (step === "quest" || step === "practice") setMode(null);
+    else if (step === "mode") setSelectedSubject(null);
+    else onBack();
+  }
+
+  const subjectIndex = subjects?.findIndex((s) => s.name === selectedSubject) ?? 0;
+  const jewel: Jewel = selectedSubject ? subjectVisual(selectedSubject, subjectIndex).jewel : "gold";
+
+  const questNodes: QuestNode[] | null =
+    topics && topicReports
       ? buildQuestNodes(
           topics.map((topic) => ({ subjectName: selectedSubject!, topic })),
           (item) => topicReports.find((r) => r.topic === item.topic)?.accuracy ?? null
         )
       : null;
-
   const doneCount = questNodes?.filter((n) => n.state === "completed").length ?? 0;
   const allDone = questNodes !== null && questNodes.length > 0 && doneCount === questNodes.length;
+
+  function inProgressFor(topic: string | undefined): InProgress | undefined {
+    return inProgress?.find((r) => r.topic === (topic ?? null));
+  }
 
   return (
     <main className="night-sky relative min-h-screen overflow-hidden pb-16">
@@ -270,21 +268,18 @@ export function SubjectPicker({
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-8">
         <header className="flex items-center justify-between gap-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-full"
-            onClick={() => (step === "quest" ? goBackFromQuest() : onBack())}
-            aria-label="Back"
-          >
+          <Button variant="ghost" size="icon" className="rounded-full" onClick={goBack} aria-label="Back">
             <ArrowLeft className="size-5" />
           </Button>
           <div className="text-center">
-            <p className={`text-xs font-semibold tracking-[0.28em] uppercase ${step === "quest" ? JEWEL_TEXT[overallJewel] : "text-primary/80"}`}>
-              {step === "subject" ? "Choose your subject" : allSubjectsMode ? `${pkClass.name} · Quest journey` : `${pkClass.name} · Quests`}
+            <p className={`text-xs font-semibold tracking-[0.28em] uppercase ${step === "subject" ? "text-primary/80" : JEWEL_TEXT[jewel]}`}>
+              {step === "subject" ? "Choose your subject" : `${pkClass.name} · ${selectedSubject}`}
             </p>
             <h1 className="text-gold-shimmer text-3xl sm:text-4xl">
-              {step === "subject" ? "Pick a subject" : allSubjectsMode ? "All subjects" : selectedSubject}
+              {step === "subject" && "Pick a subject"}
+              {step === "mode" && "How do you want to practice?"}
+              {step === "quest" && "Quest Journey"}
+              {step === "practice" && "Topic Practice"}
             </h1>
           </div>
           <span className="size-9" />
@@ -302,80 +297,79 @@ export function SubjectPicker({
             )}
 
             {subjects && subjects.length > 0 && (
-              <>
-                <button
-                  onClick={() => setAllSubjectsMode(true)}
-                  className="animate-pop-in shadow-quest group mb-5 flex w-full items-center gap-4 rounded-3xl border border-border/70 bg-card/85 p-6 text-left backdrop-blur transition-transform hover:-translate-y-1 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                >
-                  <span className="animate-float grid size-16 shrink-0 place-items-center rounded-full bg-secondary text-primary shadow-inner">
-                    <Compass className="size-8" />
-                  </span>
-                  <span className="flex-1">
-                    <span className="block text-xl font-display font-bold">All subjects</span>
-                    <span className="block text-sm text-muted-foreground">One topic at a time, across every subject</span>
-                  </span>
-                  <span className="hidden shrink-0 rounded-full bg-primary px-4 py-2 text-sm font-display font-bold text-primary-foreground sm:inline-block">
-                    Start
-                  </span>
-                </button>
-
-                <div className="grid gap-5 sm:grid-cols-2">
-                  {subjects.map((s, i) => {
-                    const { icon: Icon, jewel: j } = subjectVisual(s.name, i);
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => setSelectedSubject(s.name)}
-                        style={{ animationDelay: `${i * 90}ms` }}
-                        className="animate-pop-in shadow-quest group flex flex-col items-center rounded-3xl border border-border/70 bg-card/85 p-7 text-center backdrop-blur transition-transform hover:-translate-y-1.5 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              <div className="grid gap-5 sm:grid-cols-2">
+                {subjects.map((s, i) => {
+                  const { icon: Icon, jewel: j } = subjectVisual(s.name, i);
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => setSelectedSubject(s.name)}
+                      style={{ animationDelay: `${i * 90}ms` }}
+                      className="animate-pop-in shadow-quest group flex flex-col items-center rounded-3xl border border-border/70 bg-card/85 p-7 text-center backdrop-blur transition-transform hover:-translate-y-1.5 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    >
+                      <span
+                        className={`animate-float grid size-20 place-items-center rounded-full bg-secondary shadow-inner ${JEWEL_TEXT[j]}`}
                       >
-                        <span
-                          className={`animate-float grid size-20 place-items-center rounded-full bg-secondary shadow-inner ${JEWEL_TEXT[j]}`}
-                        >
-                          <Icon className="size-10" />
-                        </span>
-                        <span className="mt-4 text-2xl font-display font-bold">{s.name}</span>
-                        <span className="mt-4 rounded-full bg-primary px-5 py-2 text-sm font-display font-bold text-primary-foreground">
-                          Choose
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
+                        <Icon className="size-10" />
+                      </span>
+                      <span className="mt-4 text-2xl font-display font-bold">{s.name}</span>
+                      <span className="mt-4 rounded-full bg-primary px-5 py-2 text-sm font-display font-bold text-primary-foreground">
+                        Choose
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
+          </section>
+        )}
+
+        {step === "mode" && (
+          <section className="mx-auto mt-10 w-full max-w-xl flex-1">
+            <div className="grid gap-5">
+              <button
+                onClick={() => setMode("quest")}
+                className="animate-pop-in shadow-quest flex items-center gap-4 rounded-3xl border border-border/70 bg-card/85 p-6 text-left backdrop-blur transition-transform hover:-translate-y-1 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <span className={`animate-float grid size-16 shrink-0 place-items-center rounded-full bg-secondary shadow-inner ${JEWEL_TEXT[jewel]}`}>
+                  <Compass className="size-8" />
+                </span>
+                <span className="flex-1">
+                  <span className="block text-xl font-display font-bold">Quest Journey</span>
+                  <span className="block text-sm text-muted-foreground">
+                    Every topic in order, one quest at a time - no stages, just go.
+                  </span>
+                </span>
+              </button>
+
+              <button
+                onClick={() => setMode("practice")}
+                style={{ animationDelay: "90ms" }}
+                className="animate-pop-in shadow-quest flex items-center gap-4 rounded-3xl border border-border/70 bg-card/85 p-6 text-left backdrop-blur transition-transform hover:-translate-y-1 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <span className={`animate-float grid size-16 shrink-0 place-items-center rounded-full bg-secondary shadow-inner ${JEWEL_TEXT[jewel]}`}>
+                  <ListChecks className="size-8" />
+                </span>
+                <span className="flex-1">
+                  <span className="block text-xl font-display font-bold">Topic Practice</span>
+                  <span className="block text-sm text-muted-foreground">
+                    Pick any topic, clear it stage by stage - pick up right where you left off.
+                  </span>
+                </span>
+              </button>
+            </div>
           </section>
         )}
 
         {step === "quest" && (
           <section className="mx-auto mt-6 w-full max-w-2xl flex-1">
             {questNodes === null && !error && (
-              <p className="mt-8 text-center text-muted-foreground">
-                Loading your {allSubjectsMode ? "quest journey" : "quest map"}...
-              </p>
+              <p className="mt-8 text-center text-muted-foreground">Loading your quest map...</p>
             )}
 
-            {questNodes !== null && questNodes.length === 0 && !allSubjectsMode && (
-              <div className="animate-pop-in mt-8 rounded-3xl border border-border/70 bg-card/80 p-6 text-center backdrop-blur shadow-quest">
-                <p className="text-sm text-muted-foreground">
-                  Every question saved for {selectedSubject} will be included, in stages of {STAGE_SIZE} questions
-                  each.
-                </p>
-                <Button
-                  size="lg"
-                  className="mt-5 h-14 w-full rounded-2xl text-lg font-display"
-                  onClick={() => startQuiz(undefined)}
-                  disabled={loading}
-                >
-                  <Play className="size-5 fill-current" />
-                  {loading ? "Starting..." : "Start quiz"}
-                </Button>
-              </div>
-            )}
-
-            {questNodes !== null && questNodes.length === 0 && allSubjectsMode && (
+            {questNodes !== null && questNodes.length === 0 && (
               <p className="mt-8 text-center text-muted-foreground">
-                No topics are tagged yet across your subjects — add some topic-tagged content first.
+                No topics are tagged yet for {selectedSubject} — add some topic-tagged content first.
               </p>
             )}
 
@@ -384,7 +378,7 @@ export function SubjectPicker({
                 <div className="mx-auto max-w-sm rounded-full bg-card/70 p-1.5">
                   <div className="relative h-3 overflow-hidden rounded-full bg-secondary">
                     <div
-                      className={`h-full rounded-full ${JEWEL_FILL[overallJewel]}`}
+                      className={`h-full rounded-full ${JEWEL_FILL[jewel]}`}
                       style={{ width: `${(doneCount / questNodes.length) * 100}%` }}
                     />
                   </div>
@@ -399,29 +393,23 @@ export function SubjectPicker({
                   <ol className="relative space-y-8">
                     {questNodes.map((node, i) => {
                       const side = i % 2 === 0 ? "sm:mr-auto sm:pr-10" : "sm:ml-auto sm:pl-10";
-                      const nodeJewel = allSubjectsMode
-                        ? subjectVisual(node.subjectName, subjects?.findIndex((s) => s.name === node.subjectName) ?? 0).jewel
-                        : overallJewel;
                       return (
                         <li
-                          key={`${node.subjectName}::${node.topic}`}
+                          key={node.topic}
                           className={`animate-pop-in flex w-full items-center gap-4 sm:w-1/2 ${side} ${
                             i % 2 === 0 ? "sm:flex-row-reverse sm:text-right" : ""
                           }`}
                           style={{ animationDelay: `${i * 70}ms` }}
                         >
-                          <NodeBadge state={node.state} jewel={nodeJewel} index={i + 1} />
+                          <NodeBadge state={node.state} jewel={jewel} index={i + 1} />
                           <div
                             className={`flex-1 rounded-3xl border border-border/70 bg-card/80 px-5 py-4 backdrop-blur ${
                               node.state === "locked" ? "opacity-55" : "shadow-quest"
                             }`}
                           >
-                            {allSubjectsMode && (
-                              <p className={`text-xs font-semibold tracking-wide uppercase ${JEWEL_TEXT[nodeJewel]}`}>{node.subjectName}</p>
-                            )}
                             <p className="text-lg font-display font-bold">{node.topic}</p>
                             {node.state === "completed" && (
-                              <p className={`mt-1 flex items-center gap-1 text-sm ${JEWEL_TEXT[nodeJewel]} sm:justify-end`}>
+                              <p className={`mt-1 flex items-center gap-1 text-sm ${JEWEL_TEXT[jewel]} sm:justify-end`}>
                                 {Array.from({ length: 3 }).map((_, s) => (
                                   <Star
                                     key={s}
@@ -434,11 +422,7 @@ export function SubjectPicker({
                               <Button
                                 size="sm"
                                 className="mt-3 rounded-full font-display"
-                                onClick={() =>
-                                  allSubjectsMode && journeyItems
-                                    ? startJourneyQuest(i, journeyItems)
-                                    : startQuiz(node.topic)
-                                }
+                                onClick={() => startQuest(i, questNodes.map(({ subjectName, topic }) => ({ subjectName, topic })))}
                                 disabled={loading}
                               >
                                 <Play className="size-4" /> {loading ? "Starting..." : "Start quest"}
@@ -458,33 +442,55 @@ export function SubjectPicker({
                   {allDone && (
                     <div className="mt-12 flex flex-col items-center">
                       <span
-                        className={`animate-float grid size-24 place-items-center rounded-full border-2 bg-card/80 ${JEWEL_TEXT[overallJewel]} ${JEWEL_GLOW[overallJewel]}`}
+                        className={`animate-float grid size-24 place-items-center rounded-full border-2 bg-card/80 ${JEWEL_TEXT[jewel]} ${JEWEL_GLOW[jewel]}`}
                         style={{ borderColor: "currentColor" }}
                       >
                         <Castle className="size-11" />
                       </span>
-                      <p className={`mt-3 text-xl font-display font-bold ${JEWEL_TEXT[overallJewel]}`}>Quest complete!</p>
-                      <p className="text-sm text-muted-foreground">
-                        {allSubjectsMode ? "Every topic mastered so far" : `Every ${selectedSubject} topic mastered so far`}
-                      </p>
+                      <p className={`mt-3 text-xl font-display font-bold ${JEWEL_TEXT[jewel]}`}>Quest complete!</p>
+                      <p className="text-sm text-muted-foreground">Every {selectedSubject} topic mastered so far</p>
                     </div>
                   )}
                 </div>
-
-                {!allSubjectsMode && (
-                  <div className="mt-10 flex justify-center">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="rounded-full font-display"
-                      onClick={() => startQuiz(undefined)}
-                      disabled={loading}
-                    >
-                      Practice all topics mixed
-                    </Button>
-                  </div>
-                )}
               </>
+            )}
+          </section>
+        )}
+
+        {step === "practice" && (
+          <section className="mx-auto mt-6 w-full max-w-2xl flex-1">
+            {topics === null && !error && <p className="mt-8 text-center text-muted-foreground">Loading topics...</p>}
+
+            {topics && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <PracticeCard
+                  icon={Shuffle}
+                  jewel={jewel}
+                  title="Mixed practice"
+                  subtitle="A bit of everything"
+                  inProgress={inProgressFor(undefined)}
+                  loading={loading}
+                  onClick={() => startPractice(undefined)}
+                />
+                {topics.map((t) => (
+                  <PracticeCard
+                    key={t}
+                    icon={ListChecks}
+                    jewel={jewel}
+                    title={t}
+                    inProgress={inProgressFor(t)}
+                    loading={loading}
+                    onClick={() => startPractice(t)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {topics && topics.length === 0 && (
+              <p className="mt-4 text-center text-sm text-muted-foreground">
+                No topics tagged yet for {selectedSubject} - mixed practice covers every question saved for this
+                subject.
+              </p>
             )}
           </section>
         )}
@@ -492,6 +498,52 @@ export function SubjectPicker({
         {error && <p className="mt-6 text-center text-sm font-medium text-destructive">{error}</p>}
       </div>
     </main>
+  );
+}
+
+function PracticeCard({
+  icon: Icon,
+  jewel,
+  title,
+  subtitle,
+  inProgress,
+  loading,
+  onClick,
+}: {
+  icon: typeof Calculator;
+  jewel: Jewel;
+  title: string;
+  subtitle?: string;
+  inProgress?: InProgress;
+  loading: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading}
+      className="animate-pop-in shadow-quest flex items-center gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 text-left backdrop-blur transition-colors hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+    >
+      <span className={`grid size-11 shrink-0 place-items-center rounded-full bg-secondary ${JEWEL_TEXT[jewel]}`}>
+        <Icon className="size-5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-display font-semibold">{title}</span>
+        {subtitle && !inProgress && <span className="block text-xs text-muted-foreground">{subtitle}</span>}
+        {inProgress && (
+          <span className={`block text-xs font-semibold ${JEWEL_TEXT[jewel]}`}>
+            Continue — stage {inProgress.stagesCleared + 1} of {inProgress.totalStages}
+          </span>
+        )}
+      </span>
+      <span
+        className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-display font-bold ${
+          inProgress ? `${JEWEL_FILL[jewel]} text-background` : "bg-secondary text-foreground"
+        }`}
+      >
+        {inProgress ? "Continue" : "Start"}
+      </span>
+    </button>
   );
 }
 

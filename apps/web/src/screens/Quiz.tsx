@@ -51,7 +51,10 @@ export function Quiz({
 }) {
   const stages = useMemo(() => chunkIntoStages(quiz.questions, quiz.stageSize), [quiz.questions, quiz.stageSize]);
 
-  const [currentStageIndex, setCurrentStageIndex] = useState(0);
+  // Resumed quizzes (see resumeQuiz in api.ts) carry stagesCleared -
+  // start at that stage instead of stage 1, so the player picks up
+  // exactly where they left off rather than redoing cleared stages.
+  const [currentStageIndex, setCurrentStageIndex] = useState(quiz.stagesCleared ?? 0);
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
