@@ -1,32 +1,18 @@
 import { useEffect, useState } from "react";
+import { ArrowLeft, Target, TrendingUp } from "lucide-react";
 import { getClasses, getClassSubjects, getReports, getSubjects, getTopicReports } from "../api";
 import type { AttemptReport, PkClass, Subject, TopicReport } from "../types";
-import { Layout, styles } from "./Layout";
+import { Button } from "../components/ui/button";
 
-function pillStyle(selected: boolean) {
-  return {
-    ...styles.secondaryButton,
-    padding: "6px 14px",
-    fontSize: 13,
-    background: selected ? "#1a3c6e" : styles.secondaryButton.background,
-    color: selected ? "#fff" : styles.secondaryButton.color,
-  };
-}
-
-function accuracyColor(accuracy: number | null): string {
-  if (accuracy === null) return "#8a8177";
-  if (accuracy < 0.5) return "#c0392b";
-  if (accuracy < 0.75) return "#c78a1f";
-  return "#1baf7a";
-}
-
-function AccuracyBar({ accuracy }: { accuracy: number | null }) {
-  const pct = accuracy === null ? 0 : Math.round(accuracy * 100);
-  return (
-    <div style={{ background: "#eee7d8", borderRadius: 6, height: 8, overflow: "hidden" }}>
-      <div style={{ width: `${pct}%`, background: accuracyColor(accuracy), height: "100%" }} />
-    </div>
-  );
+// Accuracy-tiered bar tint (red/gold/emerald), since - unlike the Lovable
+// reference's static per-subject jewel colors - real topic accuracy here
+// can land anywhere on the scale and the color should say something
+// about *how well* a topic is going, not just which subject it's from.
+function accuracyTint(accuracy: number | null): string {
+  if (accuracy === null) return "bg-muted-foreground";
+  if (accuracy < 0.5) return "bg-ruby";
+  if (accuracy < 0.75) return "bg-primary";
+  return "bg-emerald";
 }
 
 function formatDate(iso: string): string {
@@ -72,106 +58,142 @@ export function Reports({ onBack }: { onBack: () => void }) {
   }, [selectedClassId, selectedSubjectName]);
 
   return (
-    <Layout title="My progress reports" onBack={onBack}>
-      {classes && classes.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <span style={{ ...styles.muted, display: "block", marginBottom: 8 }}>Class</span>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <button style={pillStyle(selectedClassId === null)} onClick={() => setSelectedClassId(null)}>
-              All classes
-            </button>
-            {classes.map((c) => (
-              <button key={c.id} style={pillStyle(selectedClassId === c.id)} onClick={() => setSelectedClassId(c.id)}>
-                {c.name}
-              </button>
-            ))}
+    <main className="night-sky relative min-h-screen overflow-hidden pb-16">
+      <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+      <div className="relative mx-auto w-full max-w-3xl px-6 py-8">
+        <header className="flex items-center justify-between gap-4">
+          <Button variant="ghost" size="icon" className="rounded-full" onClick={onBack} aria-label="Back">
+            <ArrowLeft className="size-5" />
+          </Button>
+          <div className="text-center">
+            <p className="text-xs font-semibold tracking-[0.28em] text-primary/80 uppercase">Just for you</p>
+            <h1 className="text-3xl sm:text-4xl">My progress</h1>
           </div>
-        </div>
-      )}
+          <span className="size-9" />
+        </header>
 
-      {subjects && subjects.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <span style={{ ...styles.muted, display: "block", marginBottom: 8 }}>Subject</span>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <button style={pillStyle(selectedSubjectName === null)} onClick={() => setSelectedSubjectName(null)}>
-              All subjects
-            </button>
-            {subjects.map((s) => (
-              <button
-                key={s.id}
-                style={pillStyle(selectedSubjectName === s.name)}
-                onClick={() => setSelectedSubjectName(s.name)}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {error && <p style={styles.error}>{error}</p>}
-
-      <h2 style={{ fontSize: 17, marginBottom: 12 }}>Topics to focus on</h2>
-      {topicReports === null && !error && <p style={styles.muted}>Loading...</p>}
-      {topicReports && topicReports.length === 0 && (
-        <p style={{ ...styles.muted, marginBottom: 28 }}>No completed quizzes yet for this filter.</p>
-      )}
-      {topicReports && topicReports.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          {topicReports.map((t) => (
-            <div key={t.topic} style={styles.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontWeight: 600 }}>{t.topic}</span>
-                <span style={{ ...styles.muted, fontSize: 13 }}>
-                  {t.correct}/{t.total} correct · {t.attempts} {t.attempts === 1 ? "quiz" : "quizzes"}
-                </span>
+        {(classes && classes.length > 0) || (subjects && subjects.length > 0) ? (
+          <section className="mt-6 flex flex-col items-center gap-3">
+            {classes && classes.length > 0 && (
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button
+                  variant={selectedClassId === null ? "default" : "secondary"}
+                  size="sm"
+                  className="rounded-full"
+                  onClick={() => setSelectedClassId(null)}
+                >
+                  All classes
+                </Button>
+                {classes.map((c) => (
+                  <Button
+                    key={c.id}
+                    variant={selectedClassId === c.id ? "default" : "secondary"}
+                    size="sm"
+                    className="rounded-full"
+                    onClick={() => setSelectedClassId(c.id)}
+                  >
+                    {c.name}
+                  </Button>
+                ))}
               </div>
-              <AccuracyBar accuracy={t.accuracy} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      <h2 style={{ fontSize: 17, marginBottom: 12 }}>Recent quizzes</h2>
-      {attempts === null && !error && <p style={styles.muted}>Loading...</p>}
-      {attempts && attempts.length === 0 && <p style={styles.muted}>No completed quizzes yet for this filter.</p>}
-      {attempts && attempts.length > 0 && (
-        <div>
-          {attempts.map((a) => (
-            <div key={a.id} style={styles.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontWeight: 600 }}>
-                  {a.subjectName}
-                  {a.className ? ` · ${a.className}` : ""}
-                </span>
-                <span style={{ ...styles.muted, fontSize: 13 }}>{formatDate(a.completedAt)}</span>
+            )}
+            {subjects && subjects.length > 0 && (
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button
+                  variant={selectedSubjectName === null ? "default" : "secondary"}
+                  size="sm"
+                  className="rounded-full"
+                  onClick={() => setSelectedSubjectName(null)}
+                >
+                  All subjects
+                </Button>
+                {subjects.map((s) => (
+                  <Button
+                    key={s.id}
+                    variant={selectedSubjectName === s.name ? "default" : "secondary"}
+                    size="sm"
+                    className="rounded-full"
+                    onClick={() => setSelectedSubjectName(s.name)}
+                  >
+                    {s.name}
+                  </Button>
+                ))}
               </div>
-              <p style={{ marginBottom: a.topicBreakdown && Object.keys(a.topicBreakdown).length > 0 ? 10 : 0 }}>
-                Score: <strong>{a.score ?? 0}</strong> / {a.totalQuestions}
-              </p>
-              {a.topicBreakdown && Object.keys(a.topicBreakdown).length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {Object.entries(a.topicBreakdown).map(([topic, stats]) => (
-                    <span
-                      key={topic}
-                      style={{
-                        fontSize: 12,
-                        padding: "3px 8px",
-                        borderRadius: 12,
-                        background: "#f6f1e6",
-                        border: "1px solid #e3ddd0",
-                        color: "#5a5148",
-                      }}
-                    >
-                      {topic}: {stats.correct}/{stats.total}
+            )}
+          </section>
+        ) : null}
+
+        {error && <p className="mt-4 text-center text-sm font-medium text-destructive">{error}</p>}
+
+        <section className="mt-6 rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest">
+          <h2 className="flex items-center gap-2 text-xl">
+            <Target className="size-5 text-primary" />
+            Topics to focus on
+          </h2>
+          {topicReports === null && !error && <p className="mt-4 text-muted-foreground">Loading...</p>}
+          {topicReports && topicReports.length === 0 && (
+            <p className="mt-4 text-muted-foreground">No completed quizzes yet for this filter.</p>
+          )}
+          {topicReports && topicReports.length > 0 && (
+            <ul className="mt-5 space-y-4">
+              {topicReports.map((t) => (
+                <li key={t.topic}>
+                  <div className="flex items-baseline justify-between text-sm">
+                    <span className="font-semibold">{t.topic}</span>
+                    <span className="text-muted-foreground">
+                      {t.correct}/{t.total} correct · {t.attempts} {t.attempts === 1 ? "quiz" : "quizzes"}
                     </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </Layout>
+                  </div>
+                  <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-secondary">
+                    <div
+                      className={`h-full rounded-full ${accuracyTint(t.accuracy)}`}
+                      style={{ width: `${t.accuracy === null ? 0 : Math.round(t.accuracy * 100)}%` }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mt-6 rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest">
+          <h2 className="flex items-center gap-2 text-xl">
+            <TrendingUp className="size-5 text-primary" />
+            Recent quizzes
+          </h2>
+          {attempts === null && !error && <p className="mt-4 text-muted-foreground">Loading...</p>}
+          {attempts && attempts.length === 0 && (
+            <p className="mt-4 text-muted-foreground">No completed quizzes yet for this filter.</p>
+          )}
+          {attempts && attempts.length > 0 && (
+            <ul className="mt-4 divide-y divide-border/60">
+              {attempts.map((a) => (
+                <li key={a.id} className="py-4 first:pt-0 last:pb-0">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="font-semibold">
+                      {a.subjectName}
+                      {a.className ? ` · ${a.className}` : ""}
+                    </span>
+                    <span className="shrink-0 text-sm text-muted-foreground">{formatDate(a.completedAt)}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Score: <span className="font-semibold text-foreground">{a.score ?? 0}</span> / {a.totalQuestions}
+                  </p>
+                  {a.topicBreakdown && Object.keys(a.topicBreakdown).length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {Object.entries(a.topicBreakdown).map(([topic, stats]) => (
+                        <span key={topic} className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-muted-foreground">
+                          {topic}: {stats.correct}/{stats.total}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </main>
   );
 }

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { Bird, FileUp, LogOut, Settings2, Users } from "lucide-react";
 import {
   createAdminQuestion,
   deleteAdminQuestion,
@@ -25,12 +26,15 @@ import type {
   TutorSettings,
   TutorTranscript,
 } from "../types";
-import { Layout, styles } from "./Layout";
+import { Button } from "../components/ui/button";
 import { Upload } from "./Upload";
 
 type Tab = "questions" | "users" | "content" | "studyBuddy";
 
 const OPTION_LABELS = ["a", "b", "c", "d", "e", "f"] as const;
+
+const inputClass =
+  "rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 // Draft shape shared by both the "edit an existing question" and "add a
 // question to an existing document" forms below - options as plain
@@ -96,16 +100,16 @@ function QuestionForm({
   saving: boolean;
 }) {
   return (
-    <div style={{ ...styles.card, marginBottom: 12 }}>
+    <div className="mb-3 rounded-xl border border-border bg-card p-4">
       <input
         value={draft.questionText}
         onChange={(e) => onChange({ ...draft, questionText: e.target.value })}
         placeholder="Question text"
-        style={{ padding: "8px 12px", fontSize: 15, width: "100%", marginBottom: 10, boxSizing: "border-box" }}
+        className={`${inputClass} mb-2.5 w-full`}
       />
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+      <div className="mb-2.5 flex flex-col gap-1.5">
         {draft.options.map((opt, oi) => (
-          <div key={oi} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div key={oi} className="flex items-center gap-2">
             <input
               type="radio"
               name="correct-option"
@@ -121,7 +125,7 @@ function QuestionForm({
                 onChange({ ...draft, options });
               }}
               placeholder={`Option ${OPTION_LABELS[oi].toUpperCase()}`}
-              style={{ padding: "6px 10px", fontSize: 14, flex: 1 }}
+              className={`${inputClass} flex-1`}
             />
             {draft.options.length > 3 && (
               <button
@@ -130,7 +134,7 @@ function QuestionForm({
                   const correctIndex = draft.correctIndex === oi ? 0 : draft.correctIndex > oi ? draft.correctIndex - 1 : draft.correctIndex;
                   onChange({ ...draft, options, correctIndex });
                 }}
-                style={{ background: "none", border: "none", color: "#8a1f11", cursor: "pointer", fontSize: 13 }}
+                className="text-sm font-medium text-destructive hover:underline"
               >
                 Remove
               </button>
@@ -140,7 +144,7 @@ function QuestionForm({
         {draft.options.length < 6 && (
           <button
             onClick={() => onChange({ ...draft, options: [...draft.options, ""] })}
-            style={{ background: "none", border: "none", color: "#1a3c6e", cursor: "pointer", fontSize: 13, alignSelf: "flex-start" }}
+            className="self-start text-sm font-semibold text-primary hover:underline"
           >
             + Add option
           </button>
@@ -151,27 +155,27 @@ function QuestionForm({
         onChange={(e) => onChange({ ...draft, explanation: e.target.value })}
         placeholder="Explanation"
         rows={2}
-        style={{ padding: "8px 12px", fontSize: 14, width: "100%", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10 }}
+        className={`${inputClass} mb-2.5 w-full font-sans`}
       />
       <input
         value={draft.topics}
         onChange={(e) => onChange({ ...draft, topics: e.target.value })}
         placeholder="Topics, comma-separated (optional)"
-        style={{ padding: "8px 12px", fontSize: 14, width: "100%", marginBottom: 10, boxSizing: "border-box" }}
+        className={`${inputClass} mb-2.5 w-full`}
       />
       <input
         value={draft.tip}
         onChange={(e) => onChange({ ...draft, tip: e.target.value })}
         placeholder="Tip (optional)"
-        style={{ padding: "8px 12px", fontSize: 14, width: "100%", marginBottom: 12, boxSizing: "border-box" }}
+        className={`${inputClass} mb-3 w-full`}
       />
-      <div style={{ display: "flex", gap: 10 }}>
-        <button style={styles.primaryButton} onClick={onSave} disabled={saving || !draftIsValid(draft)}>
+      <div className="flex gap-2.5">
+        <Button size="sm" onClick={onSave} disabled={saving || !draftIsValid(draft)}>
           {saving ? "Saving..." : "Save"}
-        </button>
-        <button style={styles.secondaryButton} onClick={onCancel} disabled={saving}>
+        </Button>
+        <Button size="sm" variant="secondary" onClick={onCancel} disabled={saving}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -258,43 +262,44 @@ function QuestionsTab() {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+      <div className="mb-4 flex flex-wrap gap-2">
         <input
           value={subjectName}
           onChange={(e) => setSubjectName(e.target.value)}
           placeholder="Filter by subject"
-          style={{ padding: "8px 12px", fontSize: 14 }}
+          className={inputClass}
         />
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search question text"
-          style={{ padding: "8px 12px", fontSize: 14 }}
+          className={inputClass}
         />
-        <button style={styles.secondaryButton} onClick={load}>
+        <Button size="sm" variant="secondary" onClick={load}>
           Search
-        </button>
+        </Button>
         {documentOptions.length > 0 && !addingDocumentId && (
-          <button
-            style={styles.secondaryButton}
+          <Button
+            size="sm"
+            variant="secondary"
             onClick={() => {
               setAddingDocumentId(documentOptions[0].documentId);
               setAddDraft({ questionText: "", options: ["", "", "", ""], correctIndex: 0, explanation: "", topics: "", tip: "" });
             }}
           >
             + Add question
-          </button>
+          </Button>
         )}
       </div>
 
       {addingDocumentId && addDraft && (
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", marginBottom: 8 }}>
-            <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>Attach to document</span>
+        <div className="mb-4">
+          <label className="mb-2 block">
+            <span className="mb-1.5 block text-sm text-muted-foreground">Attach to document</span>
             <select
               value={addingDocumentId}
               onChange={(e) => setAddingDocumentId(e.target.value)}
-              style={{ padding: "8px 12px", fontSize: 14 }}
+              className={inputClass}
             >
               {documentOptions.map((opt) => (
                 <option key={opt.documentId} value={opt.documentId}>
@@ -316,58 +321,63 @@ function QuestionsTab() {
         </div>
       )}
 
-      {error && <p style={styles.error}>{error}</p>}
-      {rows === null && <p style={styles.muted}>Loading...</p>}
-      {rows !== null && rows.length === 0 && <p style={styles.muted}>No questions found.</p>}
+      {error && <p className="mb-3 text-sm font-medium text-destructive">{error}</p>}
+      {rows === null && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {rows !== null && rows.length === 0 && <p className="text-sm text-muted-foreground">No questions found.</p>}
 
-      {rows?.map((q) =>
-        editingId === q.id && editDraft ? (
-          <QuestionForm
-            key={q.id}
-            draft={editDraft}
-            onChange={setEditDraft}
-            onSave={handleSaveEdit}
-            onCancel={() => {
-              setEditingId(null);
-              setEditDraft(null);
-            }}
-            saving={busy}
-          />
-        ) : (
-          <div key={q.id} style={styles.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>{q.questionText}</div>
-                <div style={styles.muted}>
-                  {q.subjectName}
-                  {q.className ? ` · ${q.className}` : ""}
-                  {q.topics && q.topics.length > 0 ? ` · ${q.topics.join(", ")}` : ""}
+      <div className="space-y-3">
+        {rows?.map((q) =>
+          editingId === q.id && editDraft ? (
+            <QuestionForm
+              key={q.id}
+              draft={editDraft}
+              onChange={setEditDraft}
+              onSave={handleSaveEdit}
+              onCancel={() => {
+                setEditingId(null);
+                setEditDraft(null);
+              }}
+              saving={busy}
+            />
+          ) : (
+            <div key={q.id} className="rounded-xl border border-border bg-card p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="mb-1 font-semibold">{q.questionText}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {q.subjectName}
+                    {q.className ? ` · ${q.className}` : ""}
+                    {q.topics && q.topics.length > 0 ? ` · ${q.topics.join(", ")}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setEditingId(q.id);
+                      setEditDraft(draftFromQuestion(q));
+                    }}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="text-destructive"
+                    onClick={() => {
+                      if (window.confirm("Delete this question? This can't be undone.")) handleDelete(q.id);
+                    }}
+                    disabled={busy}
+                  >
+                    Delete
+                  </Button>
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                <button
-                  style={styles.secondaryButton}
-                  onClick={() => {
-                    setEditingId(q.id);
-                    setEditDraft(draftFromQuestion(q));
-                  }}
-                >
-                  Edit
-                </button>
-                <button
-                  style={{ ...styles.secondaryButton, color: "#8a1f11" }}
-                  onClick={() => {
-                    if (window.confirm("Delete this question? This can't be undone.")) handleDelete(q.id);
-                  }}
-                  disabled={busy}
-                >
-                  Delete
-                </button>
-              </div>
             </div>
-          </div>
-        )
-      )}
+          )
+        )}
+      </div>
     </div>
   );
 }
@@ -411,57 +421,50 @@ function StudyBuddyInsightsPanel({ profileId, profileName }: { profileId: string
     }
   }
 
-  if (error) return <p style={styles.error}>{error}</p>;
-  if (data === null) return <p style={styles.muted}>Loading Study Buddy insights...</p>;
+  if (error) return <p className="text-sm font-medium text-destructive">{error}</p>;
+  if (data === null) return <p className="text-sm text-muted-foreground">Loading Study Buddy insights...</p>;
 
   const { breakdown, insights } = data;
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
-        <p style={{ ...styles.muted, margin: 0 }}>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <p className="m-0 text-sm text-muted-foreground">
           Last 30 days: {breakdown.totalAgentReplies} Study Buddy repl{breakdown.totalAgentReplies === 1 ? "y" : "ies"}
           {breakdown.ungroundedCount > 0 ? `, ${breakdown.ungroundedCount} with no matching lesson content` : ""}.
         </p>
-        <button style={styles.secondaryButton} onClick={handleGenerate} disabled={generating}>
+        <Button size="sm" variant="secondary" onClick={handleGenerate} disabled={generating}>
           {generating ? "Generating..." : "Generate insights"}
-        </button>
+        </Button>
       </div>
 
-      {notice && <p style={{ ...styles.muted, fontStyle: "italic", marginBottom: 12 }}>{notice}</p>}
+      {notice && <p className="mb-3 text-sm text-muted-foreground italic">{notice}</p>}
 
       {breakdown.topicCounts.length === 0 && insights.length === 0 && (
-        <p style={styles.muted}>No Study Buddy activity in the last 30 days.</p>
+        <p className="text-sm text-muted-foreground">No Study Buddy activity in the last 30 days.</p>
       )}
 
       {breakdown.topicCounts.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: insights.length > 0 ? 16 : 0 }}>
+        <div className={`flex flex-wrap gap-2 ${insights.length > 0 ? "mb-4" : ""}`}>
           {breakdown.topicCounts.map((t) => (
-            <span
-              key={t.topic}
-              style={{
-                fontSize: 13,
-                padding: "4px 10px",
-                borderRadius: 999,
-                background: "#f6f1e6",
-                border: "1px solid #c3c2b7",
-              }}
-            >
+            <span key={t.topic} className="rounded-full border border-border bg-secondary px-2.5 py-1 text-xs">
               {t.topic} ×{t.count}
             </span>
           ))}
         </div>
       )}
 
-      {insights.map((i) => (
-        <div key={i.id} style={{ ...styles.card, background: "#fbf8f1", border: "1px solid #d8cfb8" }}>
-          <p style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>{i.topic}</p>
-          <p style={{ fontSize: 14, marginBottom: 4 }}>{i.insightText}</p>
-          <p style={{ ...styles.muted, fontSize: 12, margin: 0 }}>
-            Generated {new Date(i.generatedAt).toLocaleDateString()}
-          </p>
-        </div>
-      ))}
+      <div className="space-y-2">
+        {insights.map((i) => (
+          <div key={i.id} className="rounded-xl border border-border bg-secondary/40 p-3.5">
+            <p className="mb-1 text-xs font-semibold">{i.topic}</p>
+            <p className="mb-1 text-sm">{i.insightText}</p>
+            <p className="m-0 text-xs text-muted-foreground">
+              Generated {new Date(i.generatedAt).toLocaleDateString()}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -496,40 +499,40 @@ function UsersTab() {
     }
   }
 
-  if (error) return <p style={styles.error}>{error}</p>;
-  if (rows === null) return <p style={styles.muted}>Loading...</p>;
-  if (rows.length === 0) return <p style={styles.muted}>No players yet.</p>;
+  if (error) return <p className="text-sm font-medium text-destructive">{error}</p>;
+  if (rows === null) return <p className="text-sm text-muted-foreground">Loading...</p>;
+  if (rows.length === 0) return <p className="text-sm text-muted-foreground">No players yet.</p>;
 
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 14 }}>
-        <thead>
-          <tr style={{ textAlign: "left", borderBottom: "2px solid #e3ddd0" }}>
-            <th style={{ padding: "8px 12px" }}>Name</th>
-            <th style={{ padding: "8px 12px" }}>Title</th>
-            <th style={{ padding: "8px 12px" }}>PIN</th>
-            <th style={{ padding: "8px 12px" }}>Quizzes</th>
-            <th style={{ padding: "8px 12px" }}>Stages cleared</th>
-            <th style={{ padding: "8px 12px" }}>Accuracy</th>
-            <th style={{ padding: "8px 12px" }}>Last active</th>
-            <th style={{ padding: "8px 12px" }}></th>
+    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      <table className="w-full text-sm">
+        <thead className="bg-secondary/60 text-left text-muted-foreground">
+          <tr>
+            <th className="px-4 py-2 font-semibold">Name</th>
+            <th className="px-4 py-2 font-semibold">Title</th>
+            <th className="px-4 py-2 font-semibold">PIN</th>
+            <th className="px-4 py-2 font-semibold">Quizzes</th>
+            <th className="px-4 py-2 font-semibold">Stages cleared</th>
+            <th className="px-4 py-2 font-semibold">Accuracy</th>
+            <th className="px-4 py-2 font-semibold">Last active</th>
+            <th className="px-4 py-2" />
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-border">
           {rows.map((r) => (
             <Fragment key={r.profileId}>
-              <tr style={{ borderBottom: expandedProfileId === r.profileId ? "none" : "1px solid #e3ddd0" }}>
-                <td style={{ padding: "8px 12px", fontWeight: 600 }}>{r.name}</td>
-                <td style={{ padding: "8px 12px" }}>{r.title ?? "–"}</td>
-                <td style={{ padding: "8px 12px" }}>{r.hasPin ? "Set" : "Not set yet"}</td>
-                <td style={{ padding: "8px 12px" }}>{r.quizzesPlayed}</td>
-                <td style={{ padding: "8px 12px" }}>{r.stagesCleared}</td>
-                <td style={{ padding: "8px 12px" }}>{r.accuracy !== null ? `${Math.round(r.accuracy * 100)}%` : "–"}</td>
-                <td style={{ padding: "8px 12px" }}>{r.lastActive ? new Date(r.lastActive).toLocaleDateString() : "–"}</td>
-                <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
+              <tr>
+                <td className="px-4 py-3 font-semibold">{r.name}</td>
+                <td className="px-4 py-3">{r.title ?? "–"}</td>
+                <td className="px-4 py-3">{r.hasPin ? "Set" : "Not set yet"}</td>
+                <td className="px-4 py-3">{r.quizzesPlayed}</td>
+                <td className="px-4 py-3">{r.stagesCleared}</td>
+                <td className="px-4 py-3">{r.accuracy !== null ? `${Math.round(r.accuracy * 100)}%` : "–"}</td>
+                <td className="px-4 py-3">{r.lastActive ? new Date(r.lastActive).toLocaleDateString() : "–"}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
                   <button
                     onClick={() => setExpandedProfileId(expandedProfileId === r.profileId ? null : r.profileId)}
-                    style={{ background: "none", border: "none", color: "#1a3c6e", cursor: "pointer", fontSize: 13, marginRight: 12 }}
+                    className="mr-3 text-sm font-semibold text-primary hover:underline"
                   >
                     {expandedProfileId === r.profileId ? "Hide Study Buddy" : "Study Buddy"}
                   </button>
@@ -537,7 +540,7 @@ function UsersTab() {
                     <button
                       onClick={() => handleResetPin(r.profileId, r.name)}
                       disabled={resettingId === r.profileId}
-                      style={{ background: "none", border: "none", color: "#8a1f11", cursor: "pointer", fontSize: 13 }}
+                      className="text-sm font-semibold text-destructive hover:underline"
                     >
                       {resettingId === r.profileId ? "Resetting..." : "Reset PIN"}
                     </button>
@@ -545,8 +548,8 @@ function UsersTab() {
                 </td>
               </tr>
               {expandedProfileId === r.profileId && (
-                <tr style={{ borderBottom: "1px solid #e3ddd0" }}>
-                  <td colSpan={8} style={{ padding: "0 12px 16px" }}>
+                <tr>
+                  <td colSpan={8} className="px-4 pb-4">
                     <StudyBuddyInsightsPanel profileId={r.profileId} profileName={r.name} />
                   </td>
                 </tr>
@@ -600,14 +603,14 @@ function StudyBuddySettingsPanel() {
     }
   }
 
-  if (error) return <p style={styles.error}>{error}</p>;
-  if (draft === null) return <p style={styles.muted}>Loading settings...</p>;
+  if (error) return <p className="text-sm font-medium text-destructive">{error}</p>;
+  if (draft === null) return <p className="text-sm text-muted-foreground">Loading settings...</p>;
 
   const dirty = settings !== null && JSON.stringify(settings) !== JSON.stringify(draft);
 
   return (
-    <div style={{ ...styles.card, maxWidth: 420 }}>
-      <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+    <div className="max-w-[420px] rounded-xl border border-border bg-card p-4">
+      <label className="mb-4 flex cursor-pointer items-center gap-2.5">
         <input
           type="checkbox"
           checked={draft.tutorEnabled}
@@ -616,19 +619,19 @@ function StudyBuddySettingsPanel() {
         <span>Study Buddy is {draft.tutorEnabled ? "on" : "off"} for everyone</span>
       </label>
 
-      <label style={{ display: "block", marginBottom: 16 }}>
-        <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>Daily message cap, per profile</span>
+      <label className="mb-4 block">
+        <span className="mb-1.5 block text-sm text-muted-foreground">Daily message cap, per profile</span>
         <input
           type="number"
           min={1}
           value={draft.tutorDailyCapPerProfile}
           onChange={(e) => setDraft({ ...draft, tutorDailyCapPerProfile: Math.max(1, Number(e.target.value) || 1) })}
-          style={{ padding: "8px 12px", fontSize: 14, width: 120 }}
+          className={`${inputClass} w-[120px]`}
         />
       </label>
 
-      <label style={{ display: "block", marginBottom: 16 }}>
-        <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>
+      <label className="mb-4 block">
+        <span className="mb-1.5 block text-sm text-muted-foreground">
           Shared daily budget across everyone (optional - not enforced yet, see the plan doc)
         </span>
         <input
@@ -639,15 +642,15 @@ function StudyBuddySettingsPanel() {
           onChange={(e) =>
             setDraft({ ...draft, tutorSharedDailyBudget: e.target.value === "" ? null : Math.max(1, Number(e.target.value) || 1) })
           }
-          style={{ padding: "8px 12px", fontSize: 14, width: 160 }}
+          className={`${inputClass} w-40`}
         />
       </label>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button style={styles.primaryButton} onClick={handleSave} disabled={saving || !dirty}>
+      <div className="flex items-center gap-3">
+        <Button size="sm" onClick={handleSave} disabled={saving || !dirty}>
           {saving ? "Saving..." : "Save"}
-        </button>
-        {saved && !dirty && <span style={{ ...styles.muted, fontSize: 13 }}>Saved.</span>}
+        </Button>
+        {saved && !dirty && <span className="text-sm text-muted-foreground">Saved.</span>}
       </div>
     </div>
   );
@@ -695,14 +698,14 @@ function StudyBuddyConversationsPanel() {
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load transcript"));
   }, [selectedConversationId]);
 
-  if (error) return <p style={styles.error}>{error}</p>;
+  if (error) return <p className="text-sm font-medium text-destructive">{error}</p>;
 
   return (
     <div>
       <select
         value={selectedProfileId}
         onChange={(e) => setSelectedProfileId(e.target.value)}
-        style={{ padding: "8px 12px", fontSize: 14, marginBottom: 16 }}
+        className={`${inputClass} mb-4`}
       >
         <option value="">Pick a player...</option>
         {profiles?.map((p) => (
@@ -712,32 +715,28 @@ function StudyBuddyConversationsPanel() {
         ))}
       </select>
 
-      {selectedProfileId && conversations === null && <p style={styles.muted}>Loading conversations...</p>}
+      {selectedProfileId && conversations === null && <p className="text-sm text-muted-foreground">Loading conversations...</p>}
       {selectedProfileId && conversations !== null && conversations.length === 0 && (
-        <p style={styles.muted}>No Study Buddy conversations yet for this player.</p>
+        <p className="text-sm text-muted-foreground">No Study Buddy conversations yet for this player.</p>
       )}
 
-      <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+      <div className="flex flex-wrap gap-6">
         {conversations && conversations.length > 0 && (
-          <div style={{ minWidth: 220 }}>
+          <div className="min-w-[220px] space-y-2">
             {conversations.map((c) => (
               <button
                 key={c.id}
                 onClick={() => setSelectedConversationId(c.id)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  marginBottom: 8,
-                  ...styles.secondaryButton,
-                  background: selectedConversationId === c.id ? "#1a3c6e" : styles.secondaryButton.background,
-                  color: selectedConversationId === c.id ? "#fff" : styles.secondaryButton.color,
-                }}
+                className={`block w-full rounded-lg border px-3 py-2 text-left text-sm shadow-sm transition-colors ${
+                  selectedConversationId === c.id
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-input bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                }`}
               >
-                <div style={{ fontWeight: 600 }}>
+                <div className="font-semibold">
                   {c.className ?? "?"} · {c.subjectName ?? "?"}
                 </div>
-                <div style={{ fontSize: 12, opacity: 0.85 }}>
+                <div className="text-xs opacity-85">
                   {c.contextType === "question" ? "Explain this to me" : "General chat"} · last active{" "}
                   {new Date(c.lastMessageAt).toLocaleDateString()}
                 </div>
@@ -747,24 +746,21 @@ function StudyBuddyConversationsPanel() {
         )}
 
         {transcript && (
-          <div style={{ flex: 1, minWidth: 260, border: "1px solid #e3ddd0", borderRadius: 10, padding: 16, maxHeight: 420, overflowY: "auto" }}>
-            {transcript.messages.length === 0 && <p style={styles.muted}>No messages in this conversation yet.</p>}
-            {transcript.messages.map((m, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: m.role === "student" ? "flex-end" : "flex-start", marginBottom: 10 }}>
-                <div
-                  style={{
-                    maxWidth: "80%",
-                    padding: "8px 12px",
-                    borderRadius: 10,
-                    fontSize: 14,
-                    background: m.role === "student" ? "#1a3c6e" : "#f0ece0",
-                    color: m.role === "student" ? "#fff" : "#241d1a",
-                  }}
-                >
-                  {m.content}
+          <div className="max-h-[420px] min-w-[260px] flex-1 overflow-y-auto rounded-xl border border-border bg-card p-4">
+            {transcript.messages.length === 0 && <p className="text-sm text-muted-foreground">No messages in this conversation yet.</p>}
+            <div className="space-y-2.5">
+              {transcript.messages.map((m, i) => (
+                <div key={i} className={`flex ${m.role === "student" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                      m.role === "student" ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
+                    }`}
+                  >
+                    {m.content}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -775,18 +771,31 @@ function StudyBuddyConversationsPanel() {
 function StudyBuddyTab() {
   return (
     <div>
-      <h2 style={{ fontSize: 16, marginBottom: 12 }}>Settings</h2>
+      <h2 className="mb-3 text-lg">Settings</h2>
       <StudyBuddySettingsPanel />
-      <h2 style={{ fontSize: 16, margin: "28px 0 12px" }}>Conversations</h2>
+      <h2 className="mt-7 mb-3 text-lg">Conversations</h2>
       <StudyBuddyConversationsPanel />
     </div>
   );
 }
 
+const TABS: { key: Tab; label: string; icon: typeof Bird }[] = [
+  { key: "questions", label: "Questions", icon: FileUp },
+  { key: "users", label: "Users", icon: Users },
+  { key: "content", label: "Add content", icon: FileUp },
+  { key: "studyBuddy", label: "Study Buddy", icon: Settings2 },
+];
+
 // Admin control center: question management, the user roster, and content
 // upload/generation all live here now - the standalone Upload screen and
 // Home's open "Add new content" button are both gone, since managing
-// content is admin-only.
+// content is admin-only. Grown-up surface, so it uses the warm
+// ".parchment" scope rather than the child-facing night-sky/gold system
+// - see src/styles.css and plan/Lovable-Design-Migration-Plan.md, and the
+// Lovable reference's own /admin route (pixel-perfect-replica/src/
+// routes/admin.tsx), which this shell follows closely: a tab row on the
+// right of the header, cards in a bordered/rounded style, tables with a
+// tinted header row.
 export function AdminDashboard({ admin, onLogOut }: { admin: AdminUser; onLogOut: () => void }) {
   const [tab, setTab] = useState<Tab>("questions");
 
@@ -796,30 +805,33 @@ export function AdminDashboard({ admin, onLogOut }: { admin: AdminUser; onLogOut
   }
 
   return (
-    <Layout title={`Admin · ${admin.username}`}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap", alignItems: "center" }}>
-        {(["questions", "users", "content", "studyBuddy"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              ...styles.secondaryButton,
-              background: tab === t ? "#1a3c6e" : styles.secondaryButton.background,
-              color: tab === t ? "#fff" : styles.secondaryButton.color,
-            }}
-          >
-            {t === "questions" ? "Questions" : t === "users" ? "Users" : t === "content" ? "Add content" : "Study Buddy"}
-          </button>
-        ))}
-        <button onClick={handleLogOut} style={{ ...styles.secondaryButton, marginLeft: "auto" }}>
-          Log out
-        </button>
-      </div>
+    <div className="parchment min-h-screen">
+      <div className="mx-auto w-full max-w-6xl px-6 py-10">
+        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
+          <div>
+            <p className="text-xs font-semibold tracking-[0.24em] text-muted-foreground uppercase">Puzzle Kingdom admin</p>
+            <h1 className="text-2xl">{admin.username}</h1>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {TABS.map((t) => (
+              <Button key={t.key} size="sm" variant={tab === t.key ? "default" : "secondary"} onClick={() => setTab(t.key)}>
+                {t.label}
+              </Button>
+            ))}
+            <Button size="sm" variant="secondary" onClick={handleLogOut}>
+              <LogOut className="size-4" />
+              Log out
+            </Button>
+          </div>
+        </header>
 
-      {tab === "questions" && <QuestionsTab />}
-      {tab === "users" && <UsersTab />}
-      {tab === "content" && <Upload />}
-      {tab === "studyBuddy" && <StudyBuddyTab />}
-    </Layout>
+        <div className="mt-6">
+          {tab === "questions" && <QuestionsTab />}
+          {tab === "users" && <UsersTab />}
+          {tab === "content" && <Upload />}
+          {tab === "studyBuddy" && <StudyBuddyTab />}
+        </div>
+      </div>
+    </div>
   );
 }

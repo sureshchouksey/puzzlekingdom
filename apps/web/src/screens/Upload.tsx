@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { estimateGeneration, generateQuestions, saveManualQuestions, uploadDocument } from "../api";
 import type { AiProvider, ManualQuestionInput, ProviderCostEstimate } from "../types";
-import { styles } from "./Layout";
+import { Button } from "../components/ui/button";
 
 type Mode = "ai" | "manual";
 type Step = "form" | "uploading" | "estimating" | "choosing" | "generating" | "done" | "error";
 
 const OPTION_LABELS = ["a", "b", "c", "d"] as const;
+
+const inputClass =
+  "rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 type Draft = {
   questionText: string;
@@ -124,87 +127,68 @@ export function Upload({ onDone }: { onDone?: () => void }) {
   return (
     <div>
       {step === "form" && (
-        <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
-          <button
-            onClick={() => setMode("ai")}
-            style={{
-              ...styles.secondaryButton,
-              background: mode === "ai" ? "#1a3c6e" : styles.secondaryButton.background,
-              color: mode === "ai" ? "#fff" : styles.secondaryButton.color,
-            }}
-          >
+        <div className="mb-6 flex gap-2.5">
+          <Button size="sm" variant={mode === "ai" ? "default" : "secondary"} onClick={() => setMode("ai")}>
             Generate with AI
-          </button>
-          <button
-            onClick={() => setMode("manual")}
-            style={{
-              ...styles.secondaryButton,
-              background: mode === "manual" ? "#1a3c6e" : styles.secondaryButton.background,
-              color: mode === "manual" ? "#fff" : styles.secondaryButton.color,
-            }}
-          >
+          </Button>
+          <Button size="sm" variant={mode === "manual" ? "default" : "secondary"} onClick={() => setMode("manual")}>
             I already have questions
-          </button>
+          </Button>
         </div>
       )}
 
       {(step === "form" || step === "uploading") && (
         <>
-          <label style={{ display: "block", marginBottom: 16 }}>
-            <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>Subject</span>
+          <label className="mb-4 block">
+            <span className="mb-1.5 block text-sm text-muted-foreground">Subject</span>
             <input
               value={subjectName}
               onChange={(e) => setSubjectName(e.target.value)}
               placeholder="e.g. Maths"
-              style={{ padding: "8px 12px", fontSize: 15, width: 240 }}
+              className={`${inputClass} w-60`}
             />
           </label>
 
           {mode === "ai" && (
             <>
-              <label style={{ display: "block", marginBottom: 16 }}>
-                <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>PDF or image of the content</span>
+              <label className="mb-4 block">
+                <span className="mb-1.5 block text-sm text-muted-foreground">PDF or image of the content</span>
                 <input
                   type="file"
                   accept="application/pdf,image/png,image/jpeg,image/webp"
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  className="text-sm"
                 />
               </label>
 
-              <label style={{ display: "block", marginBottom: 20 }}>
-                <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>
-                  Number of questions to generate
-                </span>
+              <label className="mb-5 block">
+                <span className="mb-1.5 block text-sm text-muted-foreground">Number of questions to generate</span>
                 <input
                   type="number"
                   min={1}
                   max={20}
                   value={count}
                   onChange={(e) => setCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
-                  style={{ padding: "8px 12px", fontSize: 15, width: 80 }}
+                  className={`${inputClass} w-20`}
                 />
               </label>
 
-              <button
-                style={styles.primaryButton}
-                onClick={handleUploadAndEstimate}
-                disabled={!file || !subjectName.trim() || step === "uploading"}
-              >
+              <Button onClick={handleUploadAndEstimate} disabled={!file || !subjectName.trim() || step === "uploading"}>
                 {step === "uploading" ? "Uploading..." : "Upload & get cost estimate"}
-              </button>
+              </Button>
             </>
           )}
 
           {mode === "manual" && (
             <>
-              <p style={{ ...styles.muted, marginBottom: 20 }}>
+              <p className="mb-5 text-sm text-muted-foreground">
                 Type in questions you already know the answers to (like a real past paper) - these get saved
                 straight to the database with no AI call, so there's no cost and the answers are exactly what
                 you typed.
               </p>
 
-              <label style={{ display: "block", marginBottom: 20 }}>
-                <span style={{ ...styles.muted, display: "block", marginBottom: 6 }}>
+              <label className="mb-5 block">
+                <span className="mb-1.5 block text-sm text-muted-foreground">
                   Reading passage (optional) - for comprehension questions that all refer back to one story,
                   paste it here and it'll be shown to the quiz-taker before these questions. Leave blank for
                   self-contained questions (like Maths) that don't need one.
@@ -214,96 +198,88 @@ export function Upload({ onDone }: { onDone?: () => void }) {
                   onChange={(e) => setPassage(e.target.value)}
                   placeholder="Paste the story or passage here..."
                   rows={6}
-                  style={{ padding: "8px 12px", fontSize: 14, width: "100%", boxSizing: "border-box", fontFamily: "inherit" }}
+                  className={`${inputClass} w-full font-sans`}
                 />
               </label>
 
-              {drafts.map((draft, i) => (
-                <div key={i} style={styles.card}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <span style={{ fontWeight: 600 }}>Question {i + 1}</span>
-                    {drafts.length > 1 && (
-                      <button
-                        onClick={() => setDrafts((prev) => prev.filter((_, idx) => idx !== i))}
-                        style={{ background: "none", border: "none", color: "#8a1f11", cursor: "pointer", fontSize: 13 }}
-                      >
-                        Remove
-                      </button>
-                    )}
+              <div className="space-y-3">
+                {drafts.map((draft, i) => (
+                  <div key={i} className="rounded-xl border border-border bg-card p-4">
+                    <div className="mb-2.5 flex items-center justify-between">
+                      <span className="font-semibold">Question {i + 1}</span>
+                      {drafts.length > 1 && (
+                        <button
+                          onClick={() => setDrafts((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="text-sm font-medium text-destructive hover:underline"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+
+                    <input
+                      value={draft.questionText}
+                      onChange={(e) => updateDraft(i, { questionText: e.target.value })}
+                      placeholder="Question text"
+                      className={`${inputClass} mb-2.5 w-full`}
+                    />
+
+                    <div className="mb-2.5 flex flex-col gap-1.5">
+                      {draft.options.map((opt, oi) => (
+                        <div key={oi} className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name={`correct-${i}`}
+                            checked={draft.correctIndex === oi}
+                            onChange={() => updateDraft(i, { correctIndex: oi })}
+                            title="Mark as the correct answer"
+                          />
+                          <input
+                            value={opt}
+                            onChange={(e) => updateOption(i, oi, e.target.value)}
+                            placeholder={`Option ${OPTION_LABELS[oi].toUpperCase()}${draft.correctIndex === oi ? " (correct)" : ""}`}
+                            className={`${inputClass} flex-1`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    <textarea
+                      value={draft.explanation}
+                      onChange={(e) => updateDraft(i, { explanation: e.target.value })}
+                      placeholder="Explanation shown after the child answers"
+                      rows={2}
+                      className={`${inputClass} w-full font-sans`}
+                    />
                   </div>
+                ))}
+              </div>
 
-                  <input
-                    value={draft.questionText}
-                    onChange={(e) => updateDraft(i, { questionText: e.target.value })}
-                    placeholder="Question text"
-                    style={{ padding: "8px 12px", fontSize: 15, width: "100%", marginBottom: 10, boxSizing: "border-box" }}
-                  />
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-                    {draft.options.map((opt, oi) => (
-                      <div key={oi} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <input
-                          type="radio"
-                          name={`correct-${i}`}
-                          checked={draft.correctIndex === oi}
-                          onChange={() => updateDraft(i, { correctIndex: oi })}
-                          title="Mark as the correct answer"
-                        />
-                        <input
-                          value={opt}
-                          onChange={(e) => updateOption(i, oi, e.target.value)}
-                          placeholder={`Option ${OPTION_LABELS[oi].toUpperCase()}${draft.correctIndex === oi ? " (correct)" : ""}`}
-                          style={{ padding: "6px 10px", fontSize: 14, flex: 1 }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-
-                  <textarea
-                    value={draft.explanation}
-                    onChange={(e) => updateDraft(i, { explanation: e.target.value })}
-                    placeholder="Explanation shown after the child answers"
-                    rows={2}
-                    style={{ padding: "8px 12px", fontSize: 14, width: "100%", boxSizing: "border-box", fontFamily: "inherit" }}
-                  />
-                </div>
-              ))}
-
-              <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                <button style={styles.secondaryButton} onClick={() => setDrafts((prev) => [...prev, emptyDraft()])}>
+              <div className="mt-2 flex gap-2.5">
+                <Button variant="secondary" onClick={() => setDrafts((prev) => [...prev, emptyDraft()])}>
                   + Add another question
-                </button>
-                <button
-                  style={styles.primaryButton}
-                  onClick={handleSaveManual}
-                  disabled={!subjectName.trim() || !allManualComplete}
-                >
+                </Button>
+                <Button onClick={handleSaveManual} disabled={!subjectName.trim() || !allManualComplete}>
                   Save {drafts.length} question{drafts.length === 1 ? "" : "s"} to database
-                </button>
+                </Button>
               </div>
             </>
           )}
         </>
       )}
 
-      {step === "estimating" && <p style={styles.muted}>Checking cost for each AI provider...</p>}
+      {step === "estimating" && <p className="text-sm text-muted-foreground">Checking cost for each AI provider...</p>}
 
       {step === "choosing" && (
         <>
-          <p style={{ marginBottom: 12 }}>Choose which AI generates the questions:</p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+          <p className="mb-3">Choose which AI generates the questions:</p>
+          <div className="mb-5 space-y-2.5">
             {estimates.map((est) => (
               <label
                 key={est.provider}
-                style={{
-                  ...styles.card,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  cursor: est.available ? "pointer" : "not-allowed",
-                  opacity: est.available ? 1 : 0.5,
-                  marginBottom: 0,
-                }}
+                className={`flex items-center gap-3 rounded-xl border border-border bg-card p-4 ${
+                  est.available ? "cursor-pointer" : "cursor-not-allowed opacity-50"
+                }`}
               >
                 <input
                   type="radio"
@@ -313,35 +289,37 @@ export function Upload({ onDone }: { onDone?: () => void }) {
                   onChange={() => setProvider(est.provider)}
                 />
                 <div>
-                  <div style={{ fontWeight: 600, textTransform: "capitalize" }}>{est.provider}</div>
-                  <div style={styles.muted}>{est.model}</div>
+                  <div className="font-semibold capitalize">{est.provider}</div>
+                  <div className="text-sm text-muted-foreground">{est.model}</div>
                   {est.available ? (
-                    <div style={{ fontSize: 14 }}>
+                    <div className="text-sm">
                       ~{est.estimatedInputTokens} in / ~{est.estimatedOutputTokens} out tokens &mdash; est. $
                       {est.estimatedCostUsd?.toFixed(5)}
                     </div>
                   ) : (
-                    <div style={{ fontSize: 14, color: "#8a1f11" }}>{est.reason}</div>
+                    <div className="text-sm text-destructive">{est.reason}</div>
                   )}
                 </div>
               </label>
             ))}
           </div>
-          <button style={styles.primaryButton} onClick={handleGenerate}>
+          <Button onClick={handleGenerate}>
             Generate {count} questions with {provider}
-          </button>
+          </Button>
         </>
       )}
 
       {step === "generating" && (
-        <p style={styles.muted}>{mode === "ai" ? "Generating questions - this can take up to 20 seconds..." : "Saving..."}</p>
+        <p className="text-sm text-muted-foreground">
+          {mode === "ai" ? "Generating questions - this can take up to 20 seconds..." : "Saving..."}
+        </p>
       )}
 
       {step === "done" && (
         <>
-          <p style={{ color: "#0f6b45", fontWeight: 600, marginBottom: 16 }}>{resultMessage}</p>
-          <button
-            style={styles.secondaryButton}
+          <p className="mb-4 font-semibold text-emerald">{resultMessage}</p>
+          <Button
+            variant="secondary"
             onClick={() => {
               setStep("form");
               setResultMessage(null);
@@ -353,11 +331,11 @@ export function Upload({ onDone }: { onDone?: () => void }) {
             }}
           >
             Done - add more
-          </button>
+          </Button>
         </>
       )}
 
-      {error && <p style={styles.error}>{error}</p>}
+      {error && <p className="mt-4 text-sm font-medium text-destructive">{error}</p>}
     </div>
   );
 }

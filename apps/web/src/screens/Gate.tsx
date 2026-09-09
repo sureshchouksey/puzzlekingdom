@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { checkPasscode, getStoredPasscode, PASSCODE_STORAGE_KEY } from "../api";
-import { styles } from "./Layout";
+import { Button } from "../components/ui/button";
 
 // Gates the whole app behind one shared family passcode, for the public
 // deployment. Purely a "keep random internet visitors out" measure, not
@@ -66,31 +66,26 @@ export function Gate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <main style={{ maxWidth: 360, margin: "100px auto", padding: 24, textAlign: "center" }}>
-      <h1 style={{ fontSize: 26, marginBottom: 8 }}>Puzzle Kingdom</h1>
-      <p style={{ ...styles.muted, marginBottom: 24 }}>Enter the family passcode to continue.</p>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="password"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Passcode"
-          autoFocus
-          style={{
-            padding: "10px 14px",
-            fontSize: 16,
-            width: "100%",
-            marginBottom: 12,
-            boxSizing: "border-box",
-            borderRadius: 8,
-            border: "1px solid #c3c2b7",
-          }}
-        />
-        <button type="submit" style={{ ...styles.primaryButton, width: "100%" }} disabled={submitting || !input.trim()}>
-          {submitting ? "Checking..." : "Enter"}
-        </button>
-      </form>
-      {error && <p style={styles.error}>{error}</p>}
+    <main className="night-sky relative flex min-h-screen items-center justify-center overflow-hidden px-6">
+      <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+      <div className="animate-pop-in relative w-full max-w-sm rounded-3xl border border-border/70 bg-card/85 p-8 text-center backdrop-blur shadow-quest">
+        <h1 className="text-gold-shimmer text-3xl">Puzzle Kingdom</h1>
+        <p className="mt-2 mb-6 text-muted-foreground">Enter the family passcode to continue.</p>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Passcode"
+            autoFocus
+            className="mb-3 w-full rounded-2xl border border-input bg-input/40 px-4 py-3 text-center text-lg text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <Button type="submit" size="lg" className="h-14 w-full rounded-2xl text-lg font-display" disabled={submitting || !input.trim()}>
+            {submitting ? "Checking..." : "Enter"}
+          </Button>
+        </form>
+        {error && <p className="mt-4 text-sm font-medium text-destructive">{error}</p>}
+      </div>
     </main>
   );
 }
