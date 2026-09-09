@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { Delete, ShieldHalf, Sparkles } from "lucide-react";
 import { lookupProfile, setProfilePin, verifyProfilePin } from "../api";
 import type { Profile, ProfileLookupResponse } from "../types";
+import { Button } from "../components/ui/button";
 
 type Title = "Prince" | "Princess";
 
@@ -8,7 +10,13 @@ type Title = "Prince" | "Princess";
 // POST /profiles just told us about the typed name, so the right next
 // step (choose a title + PIN for a new name, choose a PIN for an old name
 // with none yet, or enter the existing PIN) can be picked without the
-// name box itself ever listing anyone else's name.
+// name box itself ever listing anyone else's name. This state machine is
+// unchanged from the pre-reskin version - see apps/api/src/routes/
+// profiles.ts for the matching server flow, and
+// plan/Lovable-Design-Migration-Plan.md for why the Lovable reference's
+// browsable "pick your adventurer" card grid is intentionally NOT ported
+// here (it would list every other child's name, which conflicts with the
+// existing privacy decision - only the visual chrome below is reskinned).
 type Step =
   | { kind: "name" }
   | { kind: "newTitle"; looked: ProfileLookupResponse }
@@ -19,18 +27,47 @@ function capitalize(value: string) {
   return value.trim().charAt(0).toUpperCase() + value.trim().slice(1);
 }
 
-function PinInput({ value, onChange, autoFocus }: { value: string; onChange: (v: string) => void; autoFocus?: boolean }) {
+// The Lovable reference's 4-star PIN display + numeric keypad
+// (pixel-perfect-replica/src/routes/index.tsx), generalized to drive an
+// arbitrary 4-digit field via onChange rather than one hardcoded piece of
+// state - setPin needs two of these (PIN + Confirm) sharing one keypad.
+function StarPinDots({ value }: { value: string }) {
   return (
-    <input
-      value={value}
-      onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
-      inputMode="numeric"
-      pattern="[0-9]*"
-      maxLength={4}
-      placeholder="••••"
-      autoFocus={autoFocus}
-      style={{ padding: "8px 12px", fontSize: 20, letterSpacing: 6, width: 100, textAlign: "center" }}
-    />
+    <div className="flex justify-center gap-3">
+      {[0, 1, 2, 3].map((i) => (
+        <span
+          key={i}
+          className={`size-12 rounded-2xl border-2 text-2xl leading-[2.6rem] font-bold ${
+            value.length > i
+              ? "border-primary bg-primary/15 text-primary"
+              : "border-border bg-secondary/60"
+          }`}
+        >
+          {value.length > i ? "★" : ""}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function PinKeypad({ onDigit, onBackspace, onBack }: { onDigit: (d: string) => void; onBackspace: () => void; onBack: () => void }) {
+  return (
+    <div className="mt-7 grid grid-cols-3 gap-3">
+      {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
+        <Button key={d} type="button" variant="secondary" size="lg" className="h-14 text-xl" onClick={() => onDigit(d)}>
+          {d}
+        </Button>
+      ))}
+      <Button type="button" variant="ghost" size="lg" className="h-14" onClick={onBack}>
+        Back
+      </Button>
+      <Button type="button" variant="secondary" size="lg" className="h-14 text-xl" onClick={() => onDigit("0")}>
+        0
+      </Button>
+      <Button type="button" variant="ghost" size="lg" className="h-14" onClick={onBackspace}>
+        <Delete className="size-5" />
+      </Button>
+    </div>
   );
 }
 
@@ -38,12 +75,13 @@ function PinInput({ value, onChange, autoFocus }: { value: string; onChange: (v:
 // click through), then either set a 4-digit PIN (a brand-new name, or an
 // older profile from before PINs existed) or enter your existing one -
 // this is what makes a profile a real per-child login, not just a typed
-// name. See apps/api/src/routes/profiles.ts for the matching server flow.
+// name.
 export function Welcome({ onEnter, onAdminLogin }: { onEnter: (profile: Profile) => void; onAdminLogin: () => void }) {
   const [step, setStep] = useState<Step>({ kind: "name" });
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
+  const [pinField, setPinField] = useState<"pin" | "confirm">("pin");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,134 +147,202 @@ export function Welcome({ onEnter, onAdminLogin }: { onEnter: (profile: Profile)
     setName("");
     setPin("");
     setConfirmPin("");
+    setPinField("pin");
     setError(null);
   }
 
-  return (
-    <main style={{ maxWidth: 640, margin: "80px auto", padding: "0 24px" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8 }}>Welcome to Puzzle Kingdom</h1>
-      <p style={{ color: "#5a5148" }}>Upload course content, get an AI-generated quiz, see how you did.</p>
-      <img
-        src="/kingdom-castle.jpg"
-        alt="A castle behind a sweeping green lawn"
-        style={{ width: "100%", borderRadius: 12, marginTop: 48, display: "block" }}
-      />
+  // setPin's keypad types into PIN until it's full, then auto-advances to
+  // Confirm - one keypad, two 4-digit fields, no separate "which box am I
+  // typing into" tap required.
+  function pressSetPinDigit(d: string) {
+    if (pinField === "pin") {
+      if (pin.length < 4) {
+        const next = pin + d;
+        setPin(next);
+        if (next.length === 4) setPinField("confirm");
+      }
+    } else if (confirmPin.length < 4) {
+      setConfirmPin(confirmPin + d);
+    }
+  }
 
-      <div style={{ marginTop: 32, textAlign: "center" }}>
-        {step.kind === "name" && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleNameSubmit();
-            }}
-          >
-            <p style={{ color: "#5a5148", marginBottom: 12 }}>What's your name?</p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+  function backspaceSetPin() {
+    if (pinField === "confirm") {
+      if (confirmPin.length > 0) {
+        setConfirmPin(confirmPin.slice(0, -1));
+      } else {
+        setPinField("pin");
+      }
+    } else {
+      setPin(pin.slice(0, -1));
+    }
+  }
+
+  return (
+    <main className="night-sky relative min-h-screen overflow-hidden">
+      <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-background to-transparent" />
+
+      <div className="relative mx-auto flex min-h-screen w-full max-w-2xl flex-col px-6 py-10">
+        <header className="text-center">
+          <p className="text-sm font-semibold tracking-[0.3em] text-primary/80 uppercase">
+            Welcome back, adventurer
+          </p>
+          <h1 className="text-gold-shimmer mt-3 text-5xl sm:text-6xl">Puzzle Kingdom</h1>
+          <p className="mx-auto mt-3 max-w-md text-base text-muted-foreground">
+            Type your name to continue the quest.
+          </p>
+        </header>
+
+        <section className="animate-pop-in mx-auto mt-12 w-full max-w-sm rounded-3xl border border-border/70 bg-card/85 p-8 text-center backdrop-blur shadow-quest">
+          {step.kind === "name" && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleNameSubmit();
+              }}
+            >
+              <p className="text-sm text-muted-foreground">What's your name?</p>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
-                style={{ padding: "8px 12px", fontSize: 16 }}
                 autoFocus
+                className="mt-4 w-full rounded-2xl border border-input bg-input/40 px-4 py-3 text-center text-lg text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
-              <button type="submit" disabled={submitting} style={{ padding: "8px 20px", fontSize: 16, cursor: "pointer" }}>
+              <Button type="submit" disabled={submitting} size="lg" className="mt-6 h-14 w-full rounded-2xl text-lg font-display">
                 {submitting ? "..." : "Continue"}
-              </button>
-            </div>
-          </form>
-        )}
+              </Button>
+            </form>
+          )}
 
-        {step.kind === "newTitle" && (
-          <>
-            <p style={{ color: "#5a5148", marginBottom: 12 }}>Hi {step.looked.name}! Are you a prince or a princess?</p>
-            <div style={{ display: "flex", gap: 24, justifyContent: "center" }}>
-              <button
-                onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Prince" })}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 16 }}
-              >
-                <img src="/prince.png" alt="Prince" style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 12 }} />
-                <div style={{ marginTop: 8 }}>Prince</div>
-              </button>
-              <button
-                onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Princess" })}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 16 }}
-              >
-                <img src="/princess.png" alt="Princess" style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 12 }} />
-                <div style={{ marginTop: 8 }}>Princess</div>
-              </button>
-            </div>
-          </>
-        )}
-
-        {step.kind === "setPin" && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSetPin(step.looked, step.title);
-            }}
-          >
-            <p style={{ color: "#5a5148", marginBottom: 4 }}>
-              Choose a 4-digit PIN, {step.looked.name} - you'll use it every time you play.
-            </p>
-            <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 16, marginBottom: 8 }}>
-              <div>
-                <div style={{ color: "#8a8177", fontSize: 12, marginBottom: 4 }}>PIN</div>
-                <PinInput value={pin} onChange={setPin} autoFocus />
+          {step.kind === "newTitle" && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Hi {step.looked.name}! Are you a prince or a princess?
+              </p>
+              <div className="mt-6 flex justify-center gap-6">
+                <button
+                  type="button"
+                  onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Prince" })}
+                  className="group flex flex-col items-center gap-2 rounded-2xl p-2 transition-transform hover:-translate-y-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <img
+                    src="/prince.png"
+                    alt="Prince"
+                    className="size-32 rounded-2xl border-2 border-border object-cover shadow-inner transition-colors group-hover:border-primary/60"
+                  />
+                  <span className="font-display font-semibold">Prince</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Princess" })}
+                  className="group flex flex-col items-center gap-2 rounded-2xl p-2 transition-transform hover:-translate-y-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <img
+                    src="/princess.png"
+                    alt="Princess"
+                    className="size-32 rounded-2xl border-2 border-border object-cover shadow-inner transition-colors group-hover:border-primary/60"
+                  />
+                  <span className="font-display font-semibold">Princess</span>
+                </button>
               </div>
-              <div>
-                <div style={{ color: "#8a8177", fontSize: 12, marginBottom: 4 }}>Confirm</div>
-                <PinInput value={confirmPin} onChange={setConfirmPin} />
+            </>
+          )}
+
+          {step.kind === "setPin" && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSetPin(step.looked, step.title);
+              }}
+            >
+              <p className="text-sm text-muted-foreground">
+                Choose a 4-digit PIN, {step.looked.name} — you'll use it every time you play.
+              </p>
+
+              <div className="mt-6">
+                <p className={`mb-2 text-xs font-semibold tracking-wide uppercase ${pinField === "pin" ? "text-primary" : "text-muted-foreground"}`}>
+                  PIN
+                </p>
+                <StarPinDots value={pin} />
               </div>
-            </div>
-            <button
-              type="submit"
-              disabled={submitting || pin.length !== 4 || confirmPin.length !== 4}
-              style={{ padding: "8px 20px", fontSize: 16, cursor: "pointer", marginTop: 12 }}
-            >
-              {submitting ? "Saving..." : "Save PIN & enter kingdom"}
-            </button>
-          </form>
-        )}
 
-        {step.kind === "verifyPin" && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleVerifyPin(step.looked);
-            }}
-          >
-            <p style={{ color: "#5a5148", marginBottom: 12 }}>Welcome back, {step.looked.name}! Enter your PIN.</p>
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-              <PinInput value={pin} onChange={setPin} autoFocus />
-            </div>
-            <button
-              type="submit"
-              disabled={submitting || pin.length !== 4}
-              style={{ padding: "8px 20px", fontSize: 16, cursor: "pointer" }}
-            >
-              {submitting ? "Entering..." : "Enter Kingdom"}
-            </button>
-          </form>
-        )}
+              <div className="mt-5">
+                <p className={`mb-2 text-xs font-semibold tracking-wide uppercase ${pinField === "confirm" ? "text-primary" : "text-muted-foreground"}`}>
+                  Confirm
+                </p>
+                <StarPinDots value={confirmPin} />
+              </div>
 
-        {step.kind !== "name" && (
+              <PinKeypad
+                onDigit={pressSetPinDigit}
+                onBackspace={backspaceSetPin}
+                onBack={resetToStart}
+              />
+
+              <Button
+                type="submit"
+                disabled={submitting || pin.length !== 4 || confirmPin.length !== 4}
+                size="lg"
+                className="mt-6 h-14 w-full rounded-2xl text-lg font-display"
+              >
+                {submitting ? "Saving..." : "Save PIN & enter kingdom"}
+              </Button>
+            </form>
+          )}
+
+          {step.kind === "verifyPin" && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleVerifyPin(step.looked);
+              }}
+            >
+              <p className="text-sm text-muted-foreground">Welcome back, {step.looked.name}!</p>
+              <p className="mt-1 text-xs text-muted-foreground">Tap your secret 4-digit code</p>
+
+              <div className="mt-6">
+                <StarPinDots value={pin} />
+              </div>
+
+              <PinKeypad
+                onDigit={(d) => setPin((p) => (p.length < 4 ? p + d : p))}
+                onBackspace={() => setPin((p) => p.slice(0, -1))}
+                onBack={resetToStart}
+              />
+
+              <Button type="submit" disabled={submitting || pin.length !== 4} size="lg" className="mt-6 h-14 w-full rounded-2xl text-lg font-display">
+                {submitting ? "Entering..." : "Enter the kingdom"}
+              </Button>
+            </form>
+          )}
+
+          {step.kind !== "name" && (
+            <button
+              type="button"
+              onClick={resetToStart}
+              className="mx-auto mt-5 block text-sm font-medium text-muted-foreground/80 transition-colors hover:text-primary"
+            >
+              &larr; Not you? Start over
+            </button>
+          )}
+
+          {error && <p className="mt-4 text-sm font-medium text-destructive">{error}</p>}
+        </section>
+
+        <footer className="mt-auto flex flex-wrap items-center justify-center gap-2 pt-12 text-center">
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground/60">
+            <Sparkles className="size-3.5" />
+          </span>
           <button
-            type="button"
-            onClick={resetToStart}
-            style={{ background: "none", border: "none", color: "#8a4b12", cursor: "pointer", marginTop: 16, fontSize: 14, display: "block", marginLeft: "auto", marginRight: "auto" }}
+            onClick={onAdminLogin}
+            className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground/70 transition-colors hover:text-primary"
           >
-            &larr; Not you? Start over
+            <ShieldHalf className="size-3.5" />
+            Admin login
           </button>
-        )}
-
-        {error && <p style={{ color: "#8a1f11", marginTop: 12 }}>{error}</p>}
-
-        <button
-          onClick={onAdminLogin}
-          style={{ background: "none", border: "none", color: "#8a8177", cursor: "pointer", marginTop: 40, fontSize: 13, textDecoration: "underline" }}
-        >
-          Admin login
-        </button>
+        </footer>
       </div>
     </main>
   );
