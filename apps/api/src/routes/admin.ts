@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import bcrypt from "bcryptjs";
 import { eq, and, desc, ilike, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { admins, questions, documents, subjects, classes, profiles, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
+import { admins, questions, documents, subjects, classes, topics, profiles, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
 import { generatedOptionSchema } from "../lib/question-schema.js";
 import { getAppSettings } from "../services/tutorBudget.js";
 import { generateGrowthInsights, getDoubtBreakdown, getGrowthInsights } from "../services/tutorInsights.js";
@@ -38,6 +38,25 @@ const questionWriteSchema = z.object({
   explanation: z.string().min(1).optional(),
   topics: z.array(z.string().min(1)).optional(),
   tip: z.string().min(1).optional(),
+});
+
+// Body shape for creating/editing a subject from the admin dashboard.
+// Subjects are flat and reusable across classes (see subjects.ts) - just
+// a name.
+const subjectWriteSchema = z.object({
+  name: z.string().min(1),
+});
+
+// Body shape for creating/editing a topic (schema.ts's topics table -
+// class+subject scoped, ordered, with a difficulty). classId/subjectId/
+// name are required on create but all-optional here so the same schema
+// covers PATCH's "only send what changed" convention too.
+const topicWriteSchema = z.object({
+  classId: z.string().uuid().optional(),
+  subjectId: z.string().uuid().optional(),
+  name: z.string().min(1).optional(),
+  displayOrder: z.number().int().optional(),
+  difficulty: z.enum(["beginner", "medium", "hard"]).optional(),
 });
 
 // Admin-only routes: real login (username + bcrypt-hashed password, unlike
@@ -183,6 +202,125 @@ export async function adminRoutes(app: FastifyInstance) {
   protectedApp.delete<{ Params: { id: string } }>("/admin/questions/:id", async (request, reply) => {
     const [deleted] = await db.delete(questions).where(eq(questions.id, request.params.id)).returning();
     if (!deleted) return reply.status(404).send({ error: "Question not found" });
+    return reply.status(204).send();
+  });
+
+  // Subjects are flat and shared across classes (subjects.ts's GET
+  // /subjects lists them for anyone) - admin can add a new one here, e.g.
+  // when a subject like Religion needs to exist before any documents or
+  // topics can be created under it.
+  protectedApp.get("/admin/subjects", async () => {
+    return db.select().from(subjects).orderBy(subjects.name);
+  });
+
+  protectedApp.post<{ Body: unknown }>("/admin/subjects", async (request, reply) => {
+    const parsed = subjectWriteSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "Invalid subject", details: parsed.error.issues });
+
+    try {
+      const [created] = await db.insert(subjects).values({ name: parsed.data.name }).returning();
+      return reply.status(201).send(created);
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") {
+        return reply.status(409).send({ error: "A subject with that name already exists" });
+      }
+      throw err;
+    }
+  });
+
+  // Topics (plan/Question-Types-and-Content-Authoring-Plan.md's reward/
+  // difficulty labels + the quest map's node sequence - see schema.ts's
+  // comment on the topics table for the full rationale). Listed/managed
+  // per class+subject since that's how the table is scoped.
+  protectedApp.get<{ Querystring: { classId?: string; subjectId?: string } }>(
+    "/admin/topics",
+    async (request) => {
+      const { classId, subjectId } = request.query;
+      const conditions = [];
+      if (classId) conditions.push(eq(topics.classId, classId));
+      if (subjectId) conditions.push(eq(topics.subjectId, subjectId));
+
+      return db
+        .select({
+          id: topics.id,
+          classId: topics.classId,
+          subjectId: topics.subjectId,
+          name: topics.name,
+          displayOrder: topics.displayOrder,
+          difficulty: topics.difficulty,
+          createdAt: topics.createdAt,
+          className: classes.name,
+          subjectName: subjects.name,
+        })
+        .from(topics)
+        .innerJoin(classes, eq(topics.classId, classes.id))
+        .innerJoin(subjects, eq(topics.subjectId, subjects.id))
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(topics.displayOrder, topics.name);
+    }
+  );
+
+  protectedApp.post<{ Body: unknown }>("/admin/topics", async (request, reply) => {
+    const parsed = topicWriteSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "Invalid topic", details: parsed.error.issues });
+    const body = parsed.data;
+
+    if (!body.classId || !body.subjectId || !body.name) {
+      return reply.status(400).send({ error: "classId, subjectId, and name are all required to create a topic" });
+    }
+
+    try {
+      const [created] = await db
+        .insert(topics)
+        .values({
+          classId: body.classId,
+          subjectId: body.subjectId,
+          name: body.name,
+          displayOrder: body.displayOrder ?? 0,
+          difficulty: body.difficulty ?? "beginner",
+        })
+        .returning();
+      return reply.status(201).send(created);
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") {
+        return reply.status(409).send({ error: "A topic with that name already exists for this class and subject" });
+      }
+      throw err;
+    }
+  });
+
+  protectedApp.patch<{ Params: { id: string }; Body: unknown }>("/admin/topics/:id", async (request, reply) => {
+    const parsed = topicWriteSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "Invalid topic", details: parsed.error.issues });
+    const body = parsed.data;
+
+    const [existing] = await db.select().from(topics).where(eq(topics.id, request.params.id)).limit(1);
+    if (!existing) return reply.status(404).send({ error: "Topic not found" });
+
+    try {
+      const [updated] = await db
+        .update(topics)
+        .set({
+          classId: body.classId ?? existing.classId,
+          subjectId: body.subjectId ?? existing.subjectId,
+          name: body.name ?? existing.name,
+          displayOrder: body.displayOrder ?? existing.displayOrder,
+          difficulty: body.difficulty ?? existing.difficulty,
+        })
+        .where(eq(topics.id, existing.id))
+        .returning();
+      return reply.send(updated);
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") {
+        return reply.status(409).send({ error: "A topic with that name already exists for this class and subject" });
+      }
+      throw err;
+    }
+  });
+
+  protectedApp.delete<{ Params: { id: string } }>("/admin/topics/:id", async (request, reply) => {
+    const [deleted] = await db.delete(topics).where(eq(topics.id, request.params.id)).returning();
+    if (!deleted) return reply.status(404).send({ error: "Topic not found" });
     return reply.status(204).send();
   });
 
