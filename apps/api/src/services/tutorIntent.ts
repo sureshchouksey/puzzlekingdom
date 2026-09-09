@@ -102,6 +102,12 @@ const INTENT_JSON_SCHEMA = {
 export interface PendingFunContent {
   promptText: string;
   answerText: string;
+  // True when the very last thing said wasn't the original fun_content
+  // question, but this app's own follow-up offering a hint or the answer
+  // after a wrong guess (see tutor.ts's INCORRECT_GUESS_REPLIES) - changes
+  // how a short reply like "yes" should be read: it's accepting that
+  // offer, not attempting a fresh guess or asking something new.
+  offeredReveal?: boolean;
 }
 
 // Context matters here, not just the words in isolation - "a coin" means
@@ -117,7 +123,16 @@ function buildPrompt(message: string, pending?: PendingFunContent): string {
     `"${message}"`,
     "",
   ];
-  if (pending) {
+  if (pending?.offeredReveal) {
+    lines.push(
+      `Context: they were just asked this riddle/joke/puzzle/trivia question: "${pending.promptText}" ` +
+        `(the correct answer is: "${pending.answerText}"), guessed wrong, and were just asked "want a ` +
+        `hint, or should I tell you the answer?". If their reply is a short affirmative (yes/sure/ok/` +
+        "please/go ahead) or otherwise asks to be told, classify it as reveal_answer. If it instead reads " +
+        "as another guess at the answer, classify it as answer_attempt and judge correctness generously.",
+      ""
+    );
+  } else if (pending) {
     lines.push(
       `Context: they were just asked this riddle/joke/puzzle/trivia question: "${pending.promptText}" ` +
         `(the correct answer is: "${pending.answerText}"). If their message reads as an attempt to answer ` +
@@ -167,7 +182,15 @@ const PUZZLE_PATTERN = /\bpuzzles?\b|\bbrain\s?teasers?\b/i;
 // content, not stating they already have a question.
 const TRIVIA_PATTERN = /\btrivia\b|\bquiz me\b|\btest me\b|\b(ask|give)\s+me\s+(a|an)?\s*(science|english|maths?)\b/i;
 const PLAY_PATTERN = /\bplay\b|\bgame\b|\bsomething fun\b|\bbored\b|\bentertain me\b/i;
-const REVEAL_PATTERN = /\bgive up\b|\bi give up\b|\bdon'?t know\b|\bdunno\b|\bno idea\b|\bwhat'?s the answer\b|\btell me the answer\b|\bwhat is it\b|\breveal\b|\bi can'?t guess\b|\bidk\b/i;
+const REVEAL_PATTERN =
+  /\bgive up\b|\bi give up\b|\bdon'?t know\b|\bdunno\b|\bno idea\b|\bwhat'?s the answer\b|\btell me the answer\b|\bgive me (the\s+)?answer\b|\bwhat is it\b|\breveal\b|\bi can'?t guess\b|\bidk\b/i;
+
+// A bare "yes"/"sure"/"ok" and similar short agreement - only meaningful
+// as "yes, reveal it" when we just offered a hint or the answer (see
+// heuristicClassifyTutorIntent's pending.offeredReveal check below).
+// Anywhere else, a bare affirmative must NOT be read as a reveal request -
+// it's often just agreement to something else entirely.
+const AFFIRMATIVE_PATTERN = /^(yes+|yeah+|yep+|yup+|sure|ok(ay)?|please|go ahead|tell me)[\s!.,]*$/i;
 
 // Strips filler words/punctuation so "It's a coin!" and "a coin" and
 // "COIN." all reduce to the same core text for a loose match against the
@@ -193,6 +216,12 @@ export function heuristicClassifyTutorIntent(message: string, pending?: PendingF
   const text = message.trim();
   if (GREETING_PATTERN.test(text)) return { kind: "greeting" };
   if (THANKS_PATTERN.test(text) && text.length < 60) return { kind: "thanks" };
+
+  // A short "yes"/"sure"/"ok" only means "reveal it" when we just asked
+  // whether they want a hint or the answer - see PendingFunContent's
+  // offeredReveal doc comment above for why this is gated so narrowly.
+  if (pending?.offeredReveal && AFFIRMATIVE_PATTERN.test(text)) return { kind: "reveal_answer" };
+
   if (REVEAL_PATTERN.test(text)) return { kind: "reveal_answer" };
 
   if (RIDDLE_PATTERN.test(text)) return { kind: "fun_request", contentType: "riddle" };

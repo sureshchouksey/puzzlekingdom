@@ -123,7 +123,7 @@ export async function recordSimpleTutorExchange(params: {
   conversationId: string;
   studentMessage?: string;
   replyText: string;
-  sourceType: "social" | "fun_content";
+  sourceType: "social" | "fun_content" | "reveal_offer";
   sourceId?: string;
 }): Promise<void> {
   const { conversationId, studentMessage, replyText, sourceType, sourceId } = params;

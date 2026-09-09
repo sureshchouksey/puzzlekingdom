@@ -60,16 +60,24 @@ function pickRandom<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-// Was a riddle/joke/puzzle/trivia question the very last thing said in
-// this conversation? If so, the child's next message is very likely an
-// attempt to answer it (see tutorIntent.ts's answer_attempt intent and
-// the context-aware classification it does), not a fresh request or
-// lesson question. Deliberately strict about "the very last message" -
-// once anything else has happened since (a reveal, feedback on a guess, a
-// new fun-content item, an academic reply), the window closes and the
-// next message is classified fresh instead of being forced against a
-// stale question. Returns null (nothing pending) when the item has no
-// answerText at all (e.g. a tongue twister) - there's nothing to guess.
+// Was a riddle/joke/puzzle/trivia question - or this app's own offer to
+// reveal one after a wrong guess - the very last thing said in this
+// conversation? If so, the child's next message is very likely about that
+// question (see tutorIntent.ts's answer_attempt/reveal_answer intents and
+// the context-aware classification they do), not a fresh request or lesson
+// question. Deliberately strict about "the very last message" - once
+// anything else has happened since (a reveal, a correct guess, a new
+// fun-content item, an academic reply), the window closes and the next
+// message is classified fresh instead of being forced against a stale
+// question. Returns null (nothing pending) when the item has no answerText
+// at all (e.g. a tongue twister) - there's nothing to guess or reveal.
+//
+// `offeredReveal` on the return value distinguishes the two states: false
+// means the original question was just asked (a plain guess is expected
+// next); true means the child already guessed wrong once and was just
+// asked "want a hint, or should I tell you the answer?" (see tutor.ts's
+// INCORRECT_GUESS_REPLIES below) - a short "yes"/"sure" next should be
+// read as accepting that offer, not as another blind guess.
 async function getPendingFunContent(conversationId: string) {
   const [lastMessage] = await db
     .select({
@@ -81,12 +89,17 @@ async function getPendingFunContent(conversationId: string) {
     .where(eq(tutorMessages.conversationId, conversationId))
     .orderBy(desc(tutorMessages.createdAt))
     .limit(1);
-  if (!lastMessage || lastMessage.role !== "agent" || lastMessage.sourceType !== "fun_content" || !lastMessage.sourceId) {
+  if (
+    !lastMessage ||
+    lastMessage.role !== "agent" ||
+    !lastMessage.sourceId ||
+    (lastMessage.sourceType !== "fun_content" && lastMessage.sourceType !== "reveal_offer")
+  ) {
     return null;
   }
   const item = await getFunContentById(lastMessage.sourceId);
   if (!item || !item.answerText) return null;
-  return item;
+  return { ...item, offeredReveal: lastMessage.sourceType === "reveal_offer" };
 }
 
 export async function tutorRoutes(app: FastifyInstance) {
@@ -228,7 +241,9 @@ export async function tutorRoutes(app: FastifyInstance) {
         const pendingItem = await getPendingFunContent(conversation.id);
         const intent = await classifyTutorIntent(
           message,
-          pendingItem ? { promptText: pendingItem.promptText, answerText: pendingItem.answerText! } : undefined
+          pendingItem
+            ? { promptText: pendingItem.promptText, answerText: pendingItem.answerText!, offeredReveal: pendingItem.offeredReveal }
+            : undefined
         );
 
         if (intent.kind === "greeting" || intent.kind === "thanks") {
@@ -298,10 +313,15 @@ export async function tutorRoutes(app: FastifyInstance) {
             conversationId: conversation.id,
             studentMessage: message,
             replyText,
-            // 'social', same reasoning as reveal_answer above - feedback
-            // on a guess closes this question's pending window too,
-            // whether they got it right or are about to guess again.
-            sourceType: "social",
+            // A correct guess closes the window entirely - 'social',
+            // nothing left to guess or reveal. An incorrect guess instead
+            // reopens it as 'reveal_offer': INCORRECT_GUESS_REPLIES just
+            // asked "want a hint, or should I tell you the answer?", so
+            // getPendingFunContent above needs to recognize a short "yes"
+            // next turn as accepting that offer (tutorIntent.ts's
+            // offeredReveal handling) rather than as a fresh guess.
+            sourceType: intent.correct ? "social" : "reveal_offer",
+            sourceId: intent.correct ? undefined : pendingItem!.id,
           });
           return reply.send({ mode: "template", reply: replyText });
         }

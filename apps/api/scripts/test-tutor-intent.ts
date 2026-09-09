@@ -52,7 +52,7 @@ import { classifyTutorIntent, heuristicClassifyTutorIntent, type TutorIntent } f
 interface TestCase {
   label: string;
   message: string;
-  pending?: { promptText: string; answerText: string };
+  pending?: { promptText: string; answerText: string; offeredReveal?: boolean };
   expectedKind: TutorIntent["kind"];
   expectedContentType?: Extract<TutorIntent, { kind: "fun_request" }>["contentType"];
   expectedSubject?: "science" | "english" | "maths";
@@ -87,6 +87,10 @@ const POST_OFFICE_RIDDLE = {
   answerText: "The Post Office!",
 };
 const MATH_BOOK_JOKE = { promptText: "Why did the math book look so sad?", answerText: "Because it had too many problems!" };
+// Same coin riddle, but in the "already guessed wrong once" state - i.e.
+// the child was just asked "want a hint, or should I tell you the
+// answer?" (see tutor.ts's INCORRECT_GUESS_REPLIES / 'reveal_offer').
+const COIN_RIDDLE_OFFERED_REVEAL = { ...COIN_RIDDLE, offeredReveal: true };
 
 const CASES: TestCase[] = [
   // --- Greetings ---
@@ -179,6 +183,48 @@ const CASES: TestCase[] = [
     expectedKind: "academic",
     heuristicMayMiss: true,
     note: "short enough to fool the heuristic's length-based fallback into treating it as a guess - this is exactly the kind of case real NLP (context understanding, not just message length) is needed for",
+  },
+  {
+    label: "reveal: give me answer, right after a fresh riddle",
+    message: "give me answer",
+    pending: COIN_RIDDLE,
+    expectedKind: "reveal_answer",
+    note: "regression case - previously fell through REVEAL_PATTERN (only 'tell me the answer' was covered) and got misclassified as a wrong answer_attempt guess instead",
+  },
+  {
+    label: "reveal: give me the answer, right after a fresh riddle",
+    message: "give me the answer",
+    pending: COIN_RIDDLE,
+    expectedKind: "reveal_answer",
+  },
+  {
+    label: "reveal: bare 'yes' accepting a just-offered hint/answer",
+    message: "yes",
+    pending: COIN_RIDDLE_OFFERED_REVEAL,
+    expectedKind: "reveal_answer",
+    note: "regression case - a bare affirmative after 'want a hint, or should I tell you the answer?' previously wasn't recognized at all and fell all the way through to the academic honest-fallback reply",
+  },
+  {
+    label: "reveal: 'yeah' accepting a just-offered hint/answer",
+    message: "yeah",
+    pending: COIN_RIDDLE_OFFERED_REVEAL,
+    expectedKind: "reveal_answer",
+  },
+  {
+    label: "answer: another guess after a just-offered hint/answer is still graded, not swept into reveal",
+    message: "a button",
+    pending: COIN_RIDDLE_OFFERED_REVEAL,
+    expectedKind: "answer_attempt",
+    expectedCorrect: false,
+    note: "offeredReveal should only special-case a short affirmative/reveal phrasing - a genuine second guess still needs grading against the pending answer",
+  },
+  {
+    label: "a bare 'yes' with NO reveal offer pending is just a guess, not a reveal request",
+    message: "yes",
+    pending: COIN_RIDDLE,
+    expectedKind: "answer_attempt",
+    expectedCorrect: false,
+    note: "offeredReveal is false here (this is the original question, not the post-wrong-guess offer) - AFFIRMATIVE_PATTERN must stay gated on offeredReveal, not fire on any pending question",
   },
 
   // --- Academic (no pending) ---
