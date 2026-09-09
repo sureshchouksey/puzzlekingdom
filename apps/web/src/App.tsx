@@ -95,6 +95,10 @@ export default function App() {
           profile={profile}
           onBack={() => setScreen({ name: "classPicker" })}
           onQuizReady={(quiz, journey) => setScreen({ name: "quiz", quiz, journey })}
+          onGoHome={() => setScreen({ name: "home" })}
+          onOpenStudyBuddy={() => setScreen({ name: "studyBuddy", pkClass: screen.pkClass })}
+          onViewLeaderboard={() => setScreen({ name: "leaderboard" })}
+          onViewReports={() => setScreen({ name: "reports" })}
         />
       );
     }

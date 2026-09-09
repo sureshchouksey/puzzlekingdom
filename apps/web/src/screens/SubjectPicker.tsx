@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   Beaker,
+  Bird,
   BookOpen,
   Calculator,
   Castle,
+  ChartColumn,
   Check,
   Compass,
+  Gamepad2,
   ListChecks,
   Lock,
   Palette,
@@ -14,6 +17,7 @@ import {
   Shuffle,
   Sparkles,
   Star,
+  Trophy,
 } from "lucide-react";
 import { assembleQuiz, getClassSubjects, getQuizInProgress, getTopicReports, getTopics, resumeQuiz } from "../api";
 import type {
@@ -142,6 +146,10 @@ export function SubjectPicker({
   profile,
   onBack,
   onQuizReady,
+  onGoHome,
+  onOpenStudyBuddy,
+  onViewLeaderboard,
+  onViewReports,
 }: {
   pkClass: PkClass;
   profile: Profile;
@@ -149,6 +157,14 @@ export function SubjectPicker({
   // journey is only set for a Quest Journey quiz - Results.tsx uses it to
   // offer "next quest" and jump straight into the next topic.
   onQuizReady: (quiz: AssembleQuizResponse, journey?: QuestJourney) => void;
+  // Quick-nav row on the Quest Journey map (Lovable reference: Game
+  // console / Ask Sage / Leaderboard / My progress) - same destinations
+  // Home.tsx's hub links to, just reachable without backing all the way
+  // out first.
+  onGoHome: () => void;
+  onOpenStudyBuddy: () => void;
+  onViewLeaderboard: () => void;
+  onViewReports: () => void;
 }) {
   const [subjects, setSubjects] = useState<Subject[] | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
@@ -515,22 +531,7 @@ export function SubjectPicker({
                       )}
 
                       {finalNode.state === "current" && (
-                        <>
-                          <p className="mt-1 text-sm text-muted-foreground">The final challenge of {selectedSubject}</p>
-                          <Button
-                            size="lg"
-                            className="mt-4 rounded-full font-display"
-                            onClick={() =>
-                              startQuest(
-                                questNodes!.length - 1,
-                                questNodes!.map(({ subjectName, topic }) => ({ subjectName, topic }))
-                              )
-                            }
-                            disabled={loading}
-                          >
-                            <Play className="size-4" /> {loading ? "Starting..." : "Play a stage"}
-                          </Button>
-                        </>
+                        <p className="mt-1 text-sm text-muted-foreground">The final challenge of {selectedSubject}</p>
                       )}
 
                       {finalNode.state === "locked" && (
@@ -540,6 +541,38 @@ export function SubjectPicker({
                       )}
                     </div>
                   )}
+                </div>
+
+                <div className="mt-10 flex flex-col items-center gap-3">
+                  <div className="flex flex-wrap justify-center gap-3">
+                    {finalNode?.state === "current" && (
+                      <Button
+                        size="lg"
+                        className="rounded-full font-display"
+                        onClick={() =>
+                          startQuest(
+                            questNodes!.length - 1,
+                            questNodes!.map(({ subjectName, topic }) => ({ subjectName, topic }))
+                          )
+                        }
+                        disabled={loading}
+                      >
+                        <Play className="size-4" /> {loading ? "Starting..." : "Play a stage"}
+                      </Button>
+                    )}
+                    <Button variant="secondary" size="lg" className="rounded-full font-display" onClick={onGoHome}>
+                      <Gamepad2 className="size-4" /> Game console
+                    </Button>
+                    <Button variant="secondary" size="lg" className="rounded-full font-display" onClick={onOpenStudyBuddy}>
+                      <Bird className="size-4" /> Ask Sage
+                    </Button>
+                    <Button variant="secondary" size="lg" className="rounded-full font-display" onClick={onViewLeaderboard}>
+                      <Trophy className="size-4" /> Leaderboard
+                    </Button>
+                  </div>
+                  <Button variant="secondary" size="lg" className="rounded-full font-display" onClick={onViewReports}>
+                    <ChartColumn className="size-4" /> My progress
+                  </Button>
                 </div>
 
                 {/* Lets the player jump straight to another subject's quest
