@@ -11,15 +11,17 @@ import { AdminLogin } from "./screens/AdminLogin";
 import { AdminDashboard } from "./screens/AdminDashboard";
 import { ParentDashboard } from "./screens/ParentDashboard";
 import { StudyBuddy } from "./screens/StudyBuddy";
-import type { AdminUser, AssembleQuizResponse, PkClass, Profile, TutorQuestionContext } from "./types";
+import type { AdminUser, AssembleQuizResponse, PkClass, Profile, QuestJourney, TutorQuestionContext } from "./types";
 
 type Screen =
   | { name: "welcome" }
   | { name: "home" }
   | { name: "classPicker" }
   | { name: "subjectPicker"; pkClass: PkClass }
-  | { name: "quiz"; quiz: AssembleQuizResponse }
-  | { name: "results"; attemptId: string }
+  // journey is set only for an "All subjects" quest - Results.tsx uses it
+  // to jump straight into the next topic without returning to SubjectPicker.
+  | { name: "quiz"; quiz: AssembleQuizResponse; journey?: QuestJourney }
+  | { name: "results"; attemptId: string; journey?: QuestJourney }
   | { name: "reports" }
   | { name: "leaderboard" }
   // intent decides where a successful login lands - the raw admin
@@ -92,7 +94,7 @@ export default function App() {
           pkClass={screen.pkClass}
           profile={profile}
           onBack={() => setScreen({ name: "classPicker" })}
-          onQuizReady={(quiz) => setScreen({ name: "quiz", quiz })}
+          onQuizReady={(quiz, journey) => setScreen({ name: "quiz", quiz, journey })}
         />
       );
     }
@@ -100,20 +102,34 @@ export default function App() {
       return (
         <Quiz
           quiz={screen.quiz}
-          onSubmitted={(attemptId) => setScreen({ name: "results", attemptId })}
+          onSubmitted={(attemptId) => setScreen({ name: "results", attemptId, journey: screen.journey })}
           onExplain={(questionContext) => setScreen({ name: "studyBuddy", questionContext })}
         />
       );
-    case "results":
+    case "results": {
+      // profile is always set by the time Results is reachable - it's only
+      // ever entered via Quiz, which is only ever entered via SubjectPicker,
+      // which already guards on profile being set - but stay defensive.
+      if (!profile) {
+        return (
+          <main className="night-sky flex min-h-screen items-center justify-center px-6">
+            <p className="text-muted-foreground">Something went wrong - please refresh and pick a player again.</p>
+          </main>
+        );
+      }
       return (
         <Results
           attemptId={screen.attemptId}
+          journey={screen.journey}
+          profile={profile}
+          onQuizReady={(quiz, journey) => setScreen({ name: "quiz", quiz, journey })}
           onPlayAgain={() =>
             setScreen(lastClass ? { name: "subjectPicker", pkClass: lastClass } : { name: "classPicker" })
           }
           onExplain={(questionContext) => setScreen({ name: "studyBuddy", questionContext })}
         />
       );
+    }
     case "reports":
       return <Reports onBack={() => setScreen({ name: "home" })} />;
     case "leaderboard":

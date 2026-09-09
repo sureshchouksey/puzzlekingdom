@@ -57,6 +57,21 @@ export type AssembleQuizResponse = {
   questions: QuizQuestion[];
 };
 
+// One step in an "All subjects" quest journey - a single subject+topic
+// pair the player can play as an isolated, single-stage quiz. Built
+// client-side in SubjectPicker.tsx from getTopics/getTopicReports across
+// every subject in the class; nothing new is stored on the backend.
+export type QuestJourneyItem = { subjectName: string; topic: string };
+
+// Tracks progress through an "All subjects" journey across the Quiz and
+// Results screens, so Results can offer "next quest" and jump straight
+// into the next topic's quiz without routing back through SubjectPicker.
+export type QuestJourney = {
+  pkClass: PkClass;
+  items: QuestJourneyItem[];
+  index: number;
+};
+
 // Per-question review for one stage's worth of answers - what was picked,
 // what was actually correct, the explanation, and (only when wrong) the
 // memorable tip. Same shape the final Results screen uses (ResultsAnswer

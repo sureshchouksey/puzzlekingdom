@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, MessageCircle, PartyPopper, Sparkles } from "lucide-react";
-import { getResults } from "../api";
-import type { QuizResults, ResultsAnswer, TutorQuestionContext } from "../types";
+import { ArrowRight, Check, MessageCircle, PartyPopper, Sparkles } from "lucide-react";
+import { assembleQuiz, getResults } from "../api";
+import type { AssembleQuizResponse, Profile, QuestJourney, QuizResults, ResultsAnswer, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
+
+// Same single-stage sentinel SubjectPicker.tsx uses for "All subjects"
+// journeys - the API clamps it down to however many questions the next
+// topic actually has, so it always comes back as exactly one stage.
+const ALL_SUBJECTS_STAGE_SIZE = 9999;
 
 // Same grouping approach as the Quiz screen: show each passage once, right
 // before the review cards for the questions that came from it.
@@ -24,10 +29,19 @@ function groupByDocument(answers: ResultsAnswer[]): { documentId: string; passag
 
 export function Results({
   attemptId,
+  journey,
+  profile,
+  onQuizReady,
   onPlayAgain,
   onExplain,
 }: {
   attemptId: string;
+  // Only set when this attempt was one stop on an "All subjects" quest
+  // journey (see SubjectPicker.tsx) - lets this screen offer "Next quest"
+  // straight into the next topic instead of just "Play again".
+  journey?: QuestJourney;
+  profile: Profile;
+  onQuizReady: (quiz: AssembleQuizResponse, journey?: QuestJourney) => void;
   onPlayAgain: () => void;
   // "Explain this to me" on a wrong answer - Section 10 step 7. Same
   // guard as Quiz.tsx: only offered when results.classId and the
@@ -36,6 +50,32 @@ export function Results({
 }) {
   const [results, setResults] = useState<QuizResults | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [nextLoading, setNextLoading] = useState(false);
+  const [nextError, setNextError] = useState<string | null>(null);
+
+  const nextItem = journey && journey.index + 1 < journey.items.length ? journey.items[journey.index + 1] : null;
+  const journeyFinished = journey !== undefined && nextItem === null;
+
+  async function startNextQuest() {
+    if (!journey || !nextItem) return;
+    const nextIndex = journey.index + 1;
+    setNextLoading(true);
+    setNextError(null);
+    try {
+      const quiz = await assembleQuiz({
+        subjectName: nextItem.subjectName,
+        classId: journey.pkClass.id,
+        topic: nextItem.topic,
+        profileId: profile.id,
+        stageSize: ALL_SUBJECTS_STAGE_SIZE,
+      });
+      onQuizReady(quiz, { ...journey, index: nextIndex });
+    } catch (err) {
+      setNextError(err instanceof Error ? err.message : "Failed to start the next quest");
+    } finally {
+      setNextLoading(false);
+    }
+  }
 
   useEffect(() => {
     getResults(attemptId)
@@ -165,11 +205,36 @@ export function Results({
           ))}
         </div>
 
-        <div className="mt-7 flex justify-center">
-          <Button size="lg" className="rounded-full font-display" onClick={onPlayAgain}>
-            Play again
-          </Button>
-        </div>
+        {journey && (
+          <div className="mt-7 flex flex-col items-center gap-3">
+            {nextItem && (
+              <>
+                <Button size="lg" className="rounded-full font-display" onClick={startNextQuest} disabled={nextLoading}>
+                  {nextLoading ? "Starting..." : `Next quest: ${nextItem.topic}`}
+                  <ArrowRight className="size-4" />
+                </Button>
+                <p className="text-xs text-muted-foreground">{nextItem.subjectName}</p>
+              </>
+            )}
+            {journeyFinished && (
+              <>
+                <p className="font-display text-lg font-bold text-primary">Quest journey complete!</p>
+                <Button size="lg" variant="secondary" className="rounded-full font-display" onClick={onPlayAgain}>
+                  Back to subjects
+                </Button>
+              </>
+            )}
+            {nextError && <p className="text-sm font-medium text-destructive">{nextError}</p>}
+          </div>
+        )}
+
+        {!journey && (
+          <div className="mt-7 flex justify-center">
+            <Button size="lg" className="rounded-full font-display" onClick={onPlayAgain}>
+              Play again
+            </Button>
+          </div>
+        )}
       </div>
     </main>
   );
