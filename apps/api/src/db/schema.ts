@@ -205,6 +205,14 @@ export const quizAttemptAnswers = pgTable("quiz_attempt_answers", {
   // than counted as a 0 (see "Scoring-engine impact" in
   // Question-Types-and-Content-Authoring-Plan.md).
   score: real("score"),
+  // Dictionary-based spelling feedback (lib/spellcheck.ts) for
+  // short_answer/long_answer submissions only - populated regardless of
+  // score (which stays null for these types), since spelling feedback is
+  // shown "regardless of whether the answer counts toward the score" per
+  // the grading-decision section of
+  // Question-Types-and-Content-Authoring-Plan.md. Null for every other
+  // question_type.
+  spellingIssues: jsonb("spelling_issues").$type<{ word: string; suggestions: string[] }[]>(),
 });
 
 // The "how do you actually solve this kind of problem" method/formula

@@ -38,15 +38,18 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@supabase/supabase-js": "^2.45.4",
     "bcryptjs": "^3.0.3",
+    "dictionary-en": "^4.0.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.1.0",
+    "nspell": "^2.1.5",
     "postgres": "^3.4.9",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.7.5",
+    "@types/nspell": "^2.1.6",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3"

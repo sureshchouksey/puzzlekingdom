@@ -3,6 +3,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { subjects, classes, profiles, questions, documents, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
 import { gradeAnswer, starsForPercent } from "../lib/scoring.js";
+import { checkSpelling, type SpellingIssue } from "../lib/spellcheck.js";
 
 const DEFAULT_STAGE_SIZE = 10;
 // A stage must score at least this fraction correct to count as
@@ -208,6 +209,7 @@ export async function quizRoutes(app: FastifyInstance) {
         selectedPayload: unknown;
         isCorrect: boolean;
         score: number | null;
+        spellingIssues: SpellingIssue[] | null;
         questionText: string;
         options: unknown;
         correctOptionId: string;
@@ -224,12 +226,28 @@ export async function quizRoutes(app: FastifyInstance) {
           const question = byId.get(a.questionId);
           if (!question) continue;
           const { isCorrect, score } = gradeAnswer(question, a);
+          // Spelling feedback (lib/spellcheck.ts) runs for short/long
+          // answer only, independent of scoring - score stays null for
+          // these types either way (excluded from the stage total), but
+          // the child still gets told what's misspelled. See the
+          // grading-decision section of
+          // Question-Types-and-Content-Authoring-Plan.md.
+          let spellingIssues: SpellingIssue[] | null = null;
+          if (question.questionType === "short_answer" || question.questionType === "long_answer") {
+            const payload = a.selectedPayload;
+            const text =
+              payload && typeof payload === "object" && "text" in payload
+                ? (payload as { text?: unknown }).text
+                : undefined;
+            spellingIssues = await checkSpelling(typeof text === "string" ? text : "");
+          }
           newGraded.push({
             questionId: a.questionId,
             selectedOptionId: a.selectedOptionId ?? null,
             selectedPayload: a.selectedPayload ?? null,
             isCorrect,
             score,
+            spellingIssues,
             questionText: question.questionText,
             options: question.options,
             correctOptionId: question.correctOptionId,
@@ -266,6 +284,7 @@ export async function quizRoutes(app: FastifyInstance) {
             selectedPayload: g.selectedPayload,
             isCorrect: g.isCorrect,
             score: g.score,
+            spellingIssues: g.spellingIssues,
           }))
         );
       }
@@ -294,6 +313,7 @@ export async function quizRoutes(app: FastifyInstance) {
               tip: g.tip,
               isCorrect: g.isCorrect,
               score: g.score,
+              spellingIssues: g.spellingIssues,
             },
           ];
         });
@@ -329,6 +349,7 @@ export async function quizRoutes(app: FastifyInstance) {
           selectedPayload: quizAttemptAnswers.selectedPayload,
           isCorrect: quizAttemptAnswers.isCorrect,
           score: quizAttemptAnswers.score,
+          spellingIssues: quizAttemptAnswers.spellingIssues,
           questionText: questions.questionText,
           options: questions.options,
           correctOptionId: questions.correctOptionId,
@@ -365,6 +386,7 @@ export async function quizRoutes(app: FastifyInstance) {
             tip: !r.isCorrect ? r.tip : null,
             isCorrect: r.isCorrect,
             score: r.score,
+            spellingIssues: r.spellingIssues,
           },
         ];
       });
@@ -514,12 +536,15 @@ export async function quizRoutes(app: FastifyInstance) {
           questionText: question?.questionText ?? null,
           options: question?.options ?? [],
           selectedOptionId: a.selectedOptionId,
+          selectedPayload: a.selectedPayload,
           correctOptionId: question?.correctOptionId ?? null,
           explanation: question?.explanation ?? null,
           // Only worth showing the tip when it's actually needed - a
           // correct answer doesn't need a trick for next time.
           tip: !a.isCorrect ? question?.tip ?? null : null,
           isCorrect: a.isCorrect,
+          score: a.score,
+          spellingIssues: a.spellingIssues,
           documentId: question?.documentId ?? null,
           passage: question?.passage ?? null,
           topics: question?.topics ?? null,
