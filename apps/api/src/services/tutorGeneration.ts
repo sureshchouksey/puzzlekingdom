@@ -111,6 +111,73 @@ function describeSource(source: RetrievedSource): string {
     .join("\n");
 }
 
+// A short list of common words that carry no topic-distinguishing signal
+// of their own - deliberately small and English-only, same spirit as
+// Postgres's own English stopword list that tutorRetrieval.ts's FTS
+// query already relies on, just inlined here since focusMethodText below
+// is a local heuristic with no DB round trip, not real FTS.
+const FOCUS_STOPWORDS = new Set([
+  "the", "and", "for", "are", "with", "you", "your", "what", "how", "does",
+  "when", "why", "can", "will", "was", "were", "this", "that", "have", "has",
+  "about", "just", "give", "tell", "know", "please", "some",
+]);
+
+// A crude, dictionary-free "stem": the first 4 letters of any real content
+// word (3+ letters, not a stopword above). Good enough to line up
+// "additions"/"adding"/"addition" or "digits"/"digit" without a real
+// stemmer - not trying to be linguistically correct, just consistent
+// between a question and a paragraph so focusMethodText's overlap check
+// below actually fires on the words that matter.
+function focusKeywords(text: string): Set<string> {
+  const keywords = new Set<string>();
+  for (const word of text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/)) {
+    if (word.length >= 3 && !FOCUS_STOPWORDS.has(word)) {
+      keywords.add(word.length >= 4 ? word.slice(0, 4) : word);
+    }
+  }
+  return keywords;
+}
+
+// Trims a matched concept guide's full methodText down to just the
+// paragraph(s) that actually address what was asked - for the "grounded"
+// (no-Gemini) reply path only. Retrieval matches a whole guide (one per
+// topic - "Addition & Subtraction" covers both operations across several
+// worked methods, per the content-author-style-guide's own "short
+// paragraphs, one idea per paragraph" convention), but a child who only
+// asked about ADDITION shouldn't be handed every sub-method verbatim -
+// subtraction-only and missing-number-problem paragraphs included - just
+// because they happen to live in the same guide. Scores each paragraph by
+// how many of the question's own keywords it shares (via focusKeywords
+// above) and keeps only the paragraph(s) tied for the top score. Falls
+// back to the whole, untouched text whenever there's only one paragraph,
+// the question has no real content words of its own, or every paragraph
+// scores the same (0 included) - guessing wrong about what to cut would
+// be worse than just showing a bit more than strictly asked for.
+function focusMethodText(methodText: string, queryText: string): string {
+  const paragraphs = methodText
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paragraphs.length <= 1) return methodText;
+
+  const queryKeywords = focusKeywords(queryText);
+  if (queryKeywords.size === 0) return methodText;
+
+  const scored = paragraphs.map((paragraph) => {
+    const paragraphKeywords = focusKeywords(paragraph);
+    let score = 0;
+    for (const kw of queryKeywords) if (paragraphKeywords.has(kw)) score++;
+    return { paragraph, score };
+  });
+  const maxScore = Math.max(...scored.map((s) => s.score));
+  if (maxScore === 0) return methodText;
+
+  return scored
+    .filter((s) => s.score === maxScore)
+    .map((s) => s.paragraph)
+    .join("\n\n");
+}
+
 // The child-facing sibling of describeSource above: describeSource labels
 // a source for Gemini's own context window ("[Concept guide: ...]"),
 // this formats one plainly enough to show a child directly, for when
@@ -118,10 +185,18 @@ function describeSource(source: RetrievedSource): string {
 // generateTutorReply's catch block below). Only ever called with
 // retrieval.sources[0] - the single best match - matching how
 // recordTutorExchange (tutorBudget.ts) already only logs the top source,
-// not the full list.
-function formatGroundedReply(source: RetrievedSource): string {
+// not the full list. Leads with source.topic (a short tag like "Addition
+// & Subtraction"), not source.title (which can run long - some guides'
+// titles are effectively a full outline of every sub-method they cover,
+// which reads fine as a heading for Gemini's own context but is exactly
+// the wall-of-text this whole function exists to avoid for a child).
+function formatGroundedReply(source: RetrievedSource, queryText: string): string {
   if (source.type === "concept_guide") {
-    return [`Here's what I know about ${source.title}:`, source.methodText, source.formula]
+    return [
+      `Here's what I know about ${source.topic}:`,
+      focusMethodText(source.methodText, queryText),
+      source.formula,
+    ]
       .filter((part): part is string => Boolean(part))
       .join("\n\n");
   }
@@ -215,6 +290,10 @@ export async function generateTutorReply(params: {
       err
     );
     const topSource = retrieval.sources[0];
-    return { mode: "grounded", reply: formatGroundedReply(topSource), groundedSourceIds: [topSource.id] };
+    return {
+      mode: "grounded",
+      reply: formatGroundedReply(topSource, queryText),
+      groundedSourceIds: [topSource.id],
+    };
   }
 }
