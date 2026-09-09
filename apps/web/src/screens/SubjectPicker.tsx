@@ -1,21 +1,13 @@
 import { useEffect, useState } from "react";
+import { ArrowLeft, Play } from "lucide-react";
 import { assembleQuiz, getClassSubjects, getTopics } from "../api";
 import type { AssembleQuizResponse, PkClass, Profile, Subject } from "../types";
-import { Layout, styles } from "./Layout";
+import { Button } from "../components/ui/button";
 
 // Every quiz clears a "stage" - a checkpoint partway through - every 10
 // questions. Not user-configurable: the number of stages is simply
 // however many groups of 10 the subject's question count makes.
 const STAGE_SIZE = 10;
-
-function pillStyle(selected: boolean, small = false) {
-  return {
-    ...styles.secondaryButton,
-    ...(small ? { padding: "6px 14px", fontSize: 13 } : {}),
-    background: selected ? "#1a3c6e" : styles.secondaryButton.background,
-    color: selected ? "#fff" : styles.secondaryButton.color,
-  };
-}
 
 export function SubjectPicker({
   pkClass,
@@ -80,53 +72,95 @@ export function SubjectPicker({
   }
 
   return (
-    <Layout title={`${pkClass.name} — pick a subject`} onBack={onBack}>
-      {subjects === null && !error && <p style={styles.muted}>Loading subjects...</p>}
-      {subjects && subjects.length === 0 && (
-        <p style={styles.muted}>No subjects yet for {pkClass.name} - add some content first.</p>
-      )}
+    <main className="night-sky relative min-h-screen overflow-hidden">
+      <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
 
-      {subjects && subjects.length > 0 && (
-        <>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 24 }}>
-            {subjects.map((s) => (
-              <button key={s.id} onClick={() => setSelectedSubject(s.name)} style={pillStyle(selectedSubject === s.name)}>
-                {s.name}
-              </button>
-            ))}
+      <div className="relative mx-auto flex min-h-screen w-full max-w-2xl flex-col px-6 py-8">
+        <header className="flex items-center justify-between gap-4">
+          <Button variant="ghost" size="icon" className="rounded-full" onClick={onBack} aria-label="Back">
+            <ArrowLeft className="size-5" />
+          </Button>
+          <div className="text-center">
+            <p className="text-xs font-semibold tracking-[0.28em] text-primary/80 uppercase">{pkClass.name}</p>
+            <h1 className="text-2xl sm:text-3xl">Pick a subject</h1>
           </div>
+          <span className="size-9" />
+        </header>
 
-          {selectedSubject && topics && topics.length > 0 && (
-            <div style={{ marginBottom: 24 }}>
-              <span style={{ ...styles.muted, display: "block", marginBottom: 8 }}>Focus on a topic (optional)</span>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                <button onClick={() => setSelectedTopic(null)} style={pillStyle(selectedTopic === null, true)}>
-                  All topics
-                </button>
-                {topics.map((t) => (
-                  <button key={t} onClick={() => setSelectedTopic(t)} style={pillStyle(selectedTopic === t, true)}>
-                    {t}
-                  </button>
+        <section className="animate-pop-in mx-auto mt-10 w-full max-w-lg rounded-3xl border border-border/70 bg-card/80 p-7 backdrop-blur shadow-quest">
+          {subjects === null && !error && <p className="text-center text-muted-foreground">Loading subjects...</p>}
+          {subjects && subjects.length === 0 && (
+            <p className="text-center text-muted-foreground">No subjects yet for {pkClass.name} — add some content first.</p>
+          )}
+
+          {subjects && subjects.length > 0 && (
+            <>
+              <div className="flex flex-wrap justify-center gap-2.5">
+                {subjects.map((s) => (
+                  <Button
+                    key={s.id}
+                    variant={selectedSubject === s.name ? "default" : "secondary"}
+                    className="rounded-full font-display"
+                    onClick={() => setSelectedSubject(s.name)}
+                  >
+                    {s.name}
+                  </Button>
                 ))}
               </div>
-            </div>
-          )}
 
-          {selectedSubject && (
-            <>
-              <p style={{ ...styles.muted, marginBottom: 20, fontSize: 13 }}>
-                Every question saved for this subject{selectedTopic ? " and topic" : ""} will be included, in stages of {STAGE_SIZE} questions each.
-              </p>
+              {selectedSubject && topics && topics.length > 0 && (
+                <div className="mt-6">
+                  <p className="mb-2.5 text-center text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    Focus on a topic (optional)
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button
+                      variant={selectedTopic === null ? "default" : "secondary"}
+                      size="sm"
+                      className="rounded-full"
+                      onClick={() => setSelectedTopic(null)}
+                    >
+                      All topics
+                    </Button>
+                    {topics.map((t) => (
+                      <Button
+                        key={t}
+                        variant={selectedTopic === t ? "default" : "secondary"}
+                        size="sm"
+                        className="rounded-full"
+                        onClick={() => setSelectedTopic(t)}
+                      >
+                        {t}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-              <button style={styles.primaryButton} onClick={startQuiz} disabled={loading}>
-                {loading ? "Starting..." : "Start quiz"}
-              </button>
+              {selectedSubject && (
+                <>
+                  <p className="mt-6 text-center text-sm text-muted-foreground">
+                    Every question saved for this subject{selectedTopic ? " and topic" : ""} will be included, in
+                    stages of {STAGE_SIZE} questions each.
+                  </p>
+
+                  <Button
+                    size="lg"
+                    className="mt-6 h-14 w-full rounded-2xl text-lg font-display"
+                    onClick={startQuiz}
+                    disabled={loading}
+                  >
+                    <Play className="size-5 fill-current" />
+                    {loading ? "Starting..." : "Start quiz"}
+                  </Button>
+                </>
+              )}
             </>
           )}
-        </>
-      )}
 
-      {error && <p style={styles.error}>{error}</p>}
-    </Layout>
+          {error && <p className="mt-4 text-center text-sm font-medium text-destructive">{error}</p>}
+        </section>
+      </div>
+    </main>
   );
 }

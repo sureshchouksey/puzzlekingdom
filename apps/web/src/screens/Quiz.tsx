@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
+import { Check, MessageCircle, PartyPopper, Sparkles } from "lucide-react";
 import { submitStage } from "../api";
 import type { AssembleQuizResponse, QuizQuestion, SubmitStageResponse, TutorQuestionContext } from "../types";
-import { Layout, styles } from "./Layout";
+import { Button } from "../components/ui/button";
 
 // Groups a stage's questions by their source document, in first-appearance
 // order, so a passage-based document's story is only shown once, before
@@ -32,6 +33,8 @@ function chunkIntoStages(qs: QuizQuestion[], stageSize: number): QuizQuestion[][
   }
   return stages;
 }
+
+const LETTERS = "ABCDEFGH";
 
 export function Quiz({
   quiz,
@@ -100,168 +103,207 @@ export function Quiz({
     const stagePercent = stageResult.stageTotal > 0 ? Math.round((stageResult.stageScore / stageResult.stageTotal) * 100) : 0;
     const cutoffPercent = Math.round(stageResult.passThreshold * 100);
     let reviewNumber = 0;
+
     return (
-      <Layout title={`${quiz.subjectName} quiz`}>
-        <div
-          style={{
-            ...styles.card,
-            textAlign: "center",
-            padding: 24,
-            borderColor: stageResult.passed ? undefined : "#eb6834",
-            background: stageResult.passed ? undefined : "#fdf3ef",
-          }}
-        >
-          <p style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
-            {stageResult.passed ? `🎉 Stage ${stageResult.stagesCleared} cleared!` : "Not quite — give this stage another go"}
-          </p>
-          <p style={styles.muted}>
-            {stageResult.stageScore} / {stageResult.stageTotal} correct this stage ({stagePercent}%)
-            {stageResult.passed
-              ? stagesToGo > 0
-                ? ` — ${stagesToGo} stage${stagesToGo === 1 ? "" : "s"} to go`
-                : ""
-              : ` — you need at least ${cutoffPercent}% to clear a stage`}
-          </p>
-        </div>
+      <main className="night-sky relative min-h-screen overflow-hidden pb-16">
+        <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+        <div className="relative mx-auto w-full max-w-2xl px-6 py-10">
+          <header className="text-center">
+            <span className="animate-float shadow-glow mx-auto grid size-20 place-items-center rounded-full bg-primary text-primary-foreground">
+              {stageResult.passed ? <PartyPopper className="size-9" /> : <Sparkles className="size-9" />}
+            </span>
+            <h1 className="mt-4 text-3xl">
+              {stageResult.passed ? `Stage ${stageResult.stagesCleared} cleared!` : "Not quite — give this stage another go"}
+            </h1>
+            <p className="mt-1 text-muted-foreground">
+              {stageResult.stageScore} / {stageResult.stageTotal} correct this stage ({stagePercent}%)
+            </p>
+          </header>
 
-        {stageResult.answers.map((a) => {
-          reviewNumber += 1;
-          return (
-            <div
-              key={a.questionId}
-              style={{
-                ...styles.card,
-                borderColor: a.isCorrect ? "#1baf7a" : "#eb6834",
-                background: a.isCorrect ? "#effaf5" : "#fdf3ef",
-              }}
-            >
-              <p style={{ fontWeight: 600, marginBottom: 8 }}>
-                {reviewNumber}. {a.questionText} {a.isCorrect ? "✅" : "❌"}
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
-                {a.options.map((opt) => {
-                  const isSelected = opt.id === a.selectedOptionId;
-                  const isCorrectOption = opt.id === a.correctOptionId;
-                  return (
-                    <div
-                      key={opt.id}
-                      style={{
-                        fontSize: 14,
-                        fontWeight: isCorrectOption ? 700 : 400,
-                        color: isCorrectOption ? "#0f6b45" : isSelected ? "#a8391a" : "#241d1a",
-                      }}
-                    >
-                      {isSelected ? "→ " : "  "}
-                      {opt.text}
-                      {isCorrectOption ? " (correct)" : ""}
-                    </div>
-                  );
-                })}
-              </div>
-              {a.explanation && <p style={{ ...styles.muted, fontStyle: "italic" }}>{a.explanation}</p>}
-              {a.tip && (
-                <p style={{ fontSize: 13, marginTop: 8, color: "#8a4b12" }}>
-                  💡 <strong>Tip:</strong> {a.tip}
-                </p>
-              )}
-              {!a.isCorrect && quiz.classId && (
-                <button
-                  style={styles.linkButton}
-                  onClick={() =>
-                    onExplain({
-                      classId: quiz.classId!,
-                      subjectId: quiz.subjectId,
-                      subjectName: quiz.subjectName,
-                      questionId: a.questionId,
-                      questionText: a.questionText,
-                      attemptId: quiz.attemptId,
-                    })
-                  }
-                >
-                  💬 Explain this to me
-                </button>
-              )}
+          <div className="mt-8 rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest">
+            <div className="flex items-center justify-between text-sm font-semibold">
+              <span>Stage score</span>
+              <span className="text-primary">{stagePercent}%</span>
             </div>
-          );
-        })}
+            <div className="relative mt-3 h-4 overflow-hidden rounded-full bg-secondary">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${stagePercent}%` }} />
+              <span className="absolute top-0 h-full w-0.5 bg-foreground/60" style={{ left: `${cutoffPercent}%` }} />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {stageResult.passed
+                ? stagesToGo > 0
+                  ? `${stagesToGo} stage${stagesToGo === 1 ? "" : "s"} to go`
+                  : "That was the last stage!"
+                : `You need at least ${cutoffPercent}% to clear a stage — the line shows the target.`}
+            </p>
 
-        {stageResult.passed ? (
-          <button style={styles.primaryButton} onClick={continueToNextStage}>
-            Continue to stage {stageResult.stagesCleared + 1}
-          </button>
-        ) : (
-          <button style={styles.primaryButton} onClick={retryStage}>
-            Retry this stage
-          </button>
-        )}
-      </Layout>
+            <ol className="mt-6 space-y-3">
+              {stageResult.answers.map((a) => {
+                reviewNumber += 1;
+                return (
+                  <li key={a.questionId} className="rounded-2xl bg-secondary/60 p-4">
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold ${
+                          a.isCorrect ? "bg-emerald text-background" : "bg-primary/25 text-primary"
+                        }`}
+                      >
+                        {a.isCorrect ? <Check className="size-4" strokeWidth={3} /> : reviewNumber}
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold">{a.questionText}</p>
+                        <div className="mt-2 flex flex-col gap-1">
+                          {a.options.map((opt) => {
+                            const isSelected = opt.id === a.selectedOptionId;
+                            const isCorrectOption = opt.id === a.correctOptionId;
+                            return (
+                              <p
+                                key={opt.id}
+                                className={`text-sm ${
+                                  isCorrectOption
+                                    ? "font-semibold text-emerald"
+                                    : isSelected
+                                      ? "text-destructive"
+                                      : "text-muted-foreground"
+                                }`}
+                              >
+                                {isSelected ? "→ " : ""}
+                                {opt.text}
+                                {isCorrectOption ? " (correct)" : ""}
+                              </p>
+                            );
+                          })}
+                        </div>
+                        {a.explanation && <p className="mt-2 text-sm text-muted-foreground italic">{a.explanation}</p>}
+                        {a.tip && (
+                          <p className="mt-2 rounded-xl bg-primary/12 p-3 text-sm text-primary">
+                            <strong>Tip:</strong> {a.tip}
+                          </p>
+                        )}
+                        {!a.isCorrect && quiz.classId && (
+                          <button
+                            onClick={() =>
+                              onExplain({
+                                classId: quiz.classId!,
+                                subjectId: quiz.subjectId,
+                                subjectName: quiz.subjectName,
+                                questionId: a.questionId,
+                                questionText: a.questionText,
+                                attemptId: quiz.attemptId,
+                              })
+                            }
+                            className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
+                          >
+                            <MessageCircle className="size-3.5" />
+                            Explain this to me
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+
+          <div className="mt-7 flex justify-center">
+            {stageResult.passed ? (
+              <Button size="lg" className="rounded-full font-display" onClick={continueToNextStage}>
+                Continue to stage {stageResult.stagesCleared + 1}
+              </Button>
+            ) : (
+              <Button size="lg" className="rounded-full font-display" onClick={retryStage}>
+                Retry this stage
+              </Button>
+            )}
+          </div>
+        </div>
+      </main>
     );
   }
 
   let questionNumber = 0;
 
   return (
-    <Layout title={`${quiz.subjectName} quiz — stage ${currentStageIndex + 1} of ${stages.length}`}>
-      {groups.map((group) => (
-        <div key={group.documentId}>
-          {group.passage && (
-            <div
-              style={{
-                ...styles.card,
-                background: "#fbf8f1",
-                border: "1px solid #d8cfb8",
-              }}
-            >
-              <p style={{ ...styles.muted, fontWeight: 600, marginBottom: 8, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5 }}>
-                Read this passage, then answer the questions below
-              </p>
-              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, fontSize: 15 }}>{group.passage}</div>
-            </div>
-          )}
+    <main className="night-sky relative min-h-screen overflow-hidden pb-24">
+      <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+      <div className="relative mx-auto w-full max-w-2xl px-6 py-8">
+        <header className="text-center">
+          <p className="text-xs font-semibold tracking-[0.28em] text-primary/80 uppercase">{quiz.subjectName}</p>
+          <h1 className="text-2xl sm:text-3xl">
+            Stage {currentStageIndex + 1} of {stages.length}
+          </h1>
+        </header>
 
-          {group.questions.map((q) => {
-            questionNumber += 1;
-            return (
-              <div key={q.id} style={styles.card}>
-                <p style={{ fontWeight: 600, marginBottom: 12 }}>
-                  {questionNumber}. {q.questionText}
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {q.options.map((opt) => (
-                    <label
-                      key={opt.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        border: "1px solid #e3ddd0",
-                        cursor: "pointer",
-                        background: selections[q.id] === opt.id ? "#f6f1e6" : "transparent",
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name={q.id}
-                        checked={selections[q.id] === opt.id}
-                        onChange={() => setSelections((prev) => ({ ...prev, [q.id]: opt.id }))}
-                      />
-                      {opt.text}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+        <div className="mx-auto mt-6 flex max-w-sm items-center gap-2">
+          {stages.map((_, i) => (
+            <span
+              key={i}
+              className={`h-2.5 flex-1 rounded-full ${
+                i < currentStageIndex ? "bg-primary" : i === currentStageIndex ? "bg-primary/50" : "bg-secondary"
+              }`}
+            />
+          ))}
         </div>
-      ))}
 
-      <button style={styles.primaryButton} onClick={finishStage} disabled={!allAnswered || submitting}>
-        {submitting ? "Submitting..." : currentStageIndex + 1 === stages.length ? "Finish quiz" : "Finish stage"}
-      </button>
-      {!allAnswered && <p style={{ ...styles.muted, marginTop: 8 }}>Answer every question to continue.</p>}
-      {error && <p style={styles.error}>{error}</p>}
-    </Layout>
+        <div className="mt-8 space-y-6">
+          {groups.map((group) => (
+            <div key={group.documentId} className="space-y-6">
+              {group.passage && (
+                <div className="rounded-3xl border border-border/70 bg-secondary/50 p-6 backdrop-blur">
+                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    Read this passage, then answer the questions below
+                  </p>
+                  <div className="text-[15px] leading-relaxed whitespace-pre-wrap">{group.passage}</div>
+                </div>
+              )}
+
+              {group.questions.map((q) => {
+                questionNumber += 1;
+                return (
+                  <section
+                    key={q.id}
+                    className="animate-pop-in rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest sm:p-7"
+                  >
+                    <h2 className="text-lg leading-snug font-semibold sm:text-xl">
+                      {questionNumber}. {q.questionText}
+                    </h2>
+                    <div className="mt-5 grid gap-3">
+                      {q.options.map((opt, i) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => setSelections((prev) => ({ ...prev, [q.id]: opt.id }))}
+                          className={`rounded-2xl border-2 px-5 py-3.5 text-left font-semibold transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
+                            selections[q.id] === opt.id
+                              ? "border-primary bg-primary/15 text-primary"
+                              : "border-border bg-secondary/60"
+                          }`}
+                        >
+                          <span className="mr-3 text-muted-foreground">{LETTERS[i] ?? ""}</span>
+                          {opt.text}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-8 flex flex-col items-center">
+          <Button
+            size="lg"
+            className="h-14 w-full max-w-sm rounded-2xl text-lg font-display"
+            onClick={finishStage}
+            disabled={!allAnswered || submitting}
+          >
+            {submitting ? "Submitting..." : currentStageIndex + 1 === stages.length ? "Finish quiz" : "Finish stage"}
+          </Button>
+          {!allAnswered && <p className="mt-3 text-sm text-muted-foreground">Answer every question to continue.</p>}
+          {error && <p className="mt-3 text-sm font-medium text-destructive">{error}</p>}
+        </div>
+      </div>
+    </main>
   );
 }

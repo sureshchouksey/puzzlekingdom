@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { Check, MessageCircle, PartyPopper, Sparkles } from "lucide-react";
 import { getResults } from "../api";
 import type { QuizResults, ResultsAnswer, TutorQuestionContext } from "../types";
-import { Layout, styles } from "./Layout";
+import { Button } from "../components/ui/button";
 
 // Same grouping approach as the Quiz screen: show each passage once, right
 // before the review cards for the questions that came from it.
@@ -46,111 +47,130 @@ export function Results({
 
   if (error) {
     return (
-      <Layout title="Results">
-        <p style={styles.error}>{error}</p>
-      </Layout>
+      <main className="night-sky relative flex min-h-screen items-center justify-center overflow-hidden px-6">
+        <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+        <p className="relative text-sm font-medium text-destructive">{error}</p>
+      </main>
     );
   }
 
   if (!results) {
     return (
-      <Layout title="Results">
-        <p style={styles.muted}>Loading results...</p>
-      </Layout>
+      <main className="night-sky relative flex min-h-screen items-center justify-center overflow-hidden px-6">
+        <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+        <p className="relative text-muted-foreground">Loading results...</p>
+      </main>
     );
   }
 
+  const scored = results.score !== null;
+  const percent = scored && results.totalQuestions > 0 ? Math.round(((results.score ?? 0) / results.totalQuestions) * 100) : null;
+  const passed = percent !== null && percent >= 70;
   let answerNumber = 0;
 
   return (
-    <Layout title={`${results.subjectName ?? "Quiz"} results`}>
-      <p style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>
-        Score: {results.score} / {results.totalQuestions}
-      </p>
-
-      {groups.map((group) => (
-        <div key={group.documentId}>
-          {group.passage && (
-            <div
-              style={{
-                ...styles.card,
-                background: "#fbf8f1",
-                border: "1px solid #d8cfb8",
-              }}
-            >
-              <p style={{ ...styles.muted, fontWeight: 600, marginBottom: 8, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5 }}>
-                Passage
-              </p>
-              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, fontSize: 15 }}>{group.passage}</div>
-            </div>
+    <main className="night-sky relative min-h-screen overflow-hidden pb-16">
+      <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+      <div className="relative mx-auto w-full max-w-2xl px-6 py-10">
+        <header className="text-center">
+          <span className="animate-float shadow-glow mx-auto grid size-20 place-items-center rounded-full bg-primary text-primary-foreground">
+            {passed ? <PartyPopper className="size-9" /> : <Sparkles className="size-9" />}
+          </span>
+          <h1 className="mt-4 text-3xl">{results.subjectName ?? "Quiz"} results</h1>
+          {scored && (
+            <p className="mt-1 text-muted-foreground">
+              {results.score} of {results.totalQuestions} correct{percent !== null ? ` (${percent}%)` : ""}
+            </p>
           )}
+        </header>
 
-          {group.answers.map((a) => {
-            answerNumber += 1;
-            return (
-              <div
-                key={a.questionId}
-                style={{
-                  ...styles.card,
-                  borderColor: a.isCorrect ? "#1baf7a" : "#eb6834",
-                  background: a.isCorrect ? "#effaf5" : "#fdf3ef",
-                }}
-              >
-                <p style={{ fontWeight: 600, marginBottom: 8 }}>
-                  {answerNumber}. {a.questionText} {a.isCorrect ? "✅" : "❌"}
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
-                  {a.options.map((opt) => {
-                    const isSelected = opt.id === a.selectedOptionId;
-                    const isCorrectOption = opt.id === a.correctOptionId;
-                    return (
-                      <div
-                        key={opt.id}
-                        style={{
-                          fontSize: 14,
-                          fontWeight: isCorrectOption ? 700 : 400,
-                          color: isCorrectOption ? "#0f6b45" : isSelected ? "#a8391a" : "#241d1a",
-                        }}
-                      >
-                        {isSelected ? "→ " : "  "}
-                        {opt.text}
-                        {isCorrectOption ? " (correct)" : ""}
-                      </div>
-                    );
-                  })}
+        <div className="mt-8 rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest">
+          {groups.map((group) => (
+            <div key={group.documentId}>
+              {group.passage && (
+                <div className="mb-4 rounded-2xl bg-secondary/50 p-5">
+                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Passage</p>
+                  <div className="text-[15px] leading-relaxed whitespace-pre-wrap">{group.passage}</div>
                 </div>
-                {a.explanation && <p style={{ ...styles.muted, fontStyle: "italic" }}>{a.explanation}</p>}
-                {a.tip && (
-                  <p style={{ fontSize: 13, marginTop: 8, color: "#8a4b12" }}>
-                    💡 <strong>Tip:</strong> {a.tip}
-                  </p>
-                )}
-                {!a.isCorrect && a.questionText && results.classId && (
-                  <button
-                    style={styles.linkButton}
-                    onClick={() =>
-                      onExplain({
-                        classId: results.classId!,
-                        subjectId: results.subjectId,
-                        subjectName: results.subjectName ?? "",
-                        questionId: a.questionId,
-                        questionText: a.questionText!,
-                        attemptId,
-                      })
-                    }
-                  >
-                    💬 Explain this to me
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ))}
+              )}
 
-      <button style={styles.primaryButton} onClick={onPlayAgain}>
-        Play again
-      </button>
-    </Layout>
+              <ol className="space-y-3">
+                {group.answers.map((a) => {
+                  answerNumber += 1;
+                  return (
+                    <li key={a.questionId} className="rounded-2xl bg-secondary/60 p-4">
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold ${
+                            a.isCorrect ? "bg-emerald text-background" : "bg-primary/25 text-primary"
+                          }`}
+                        >
+                          {a.isCorrect ? <Check className="size-4" strokeWidth={3} /> : answerNumber}
+                        </span>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold">{a.questionText}</p>
+                          <div className="mt-2 flex flex-col gap-1">
+                            {a.options.map((opt) => {
+                              const isSelected = opt.id === a.selectedOptionId;
+                              const isCorrectOption = opt.id === a.correctOptionId;
+                              return (
+                                <p
+                                  key={opt.id}
+                                  className={`text-sm ${
+                                    isCorrectOption
+                                      ? "font-semibold text-emerald"
+                                      : isSelected
+                                        ? "text-destructive"
+                                        : "text-muted-foreground"
+                                  }`}
+                                >
+                                  {isSelected ? "→ " : ""}
+                                  {opt.text}
+                                  {isCorrectOption ? " (correct)" : ""}
+                                </p>
+                              );
+                            })}
+                          </div>
+                          {a.explanation && <p className="mt-2 text-sm text-muted-foreground italic">{a.explanation}</p>}
+                          {a.tip && (
+                            <p className="mt-2 rounded-xl bg-primary/12 p-3 text-sm text-primary">
+                              <strong>Tip:</strong> {a.tip}
+                            </p>
+                          )}
+                          {!a.isCorrect && a.questionText && results.classId && (
+                            <button
+                              onClick={() =>
+                                onExplain({
+                                  classId: results.classId!,
+                                  subjectId: results.subjectId,
+                                  subjectName: results.subjectName ?? "",
+                                  questionId: a.questionId,
+                                  questionText: a.questionText!,
+                                  attemptId,
+                                })
+                              }
+                              className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
+                            >
+                              <MessageCircle className="size-3.5" />
+                              Explain this to me
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-7 flex justify-center">
+          <Button size="lg" className="rounded-full font-display" onClick={onPlayAgain}>
+            Play again
+          </Button>
+        </div>
+      </div>
+    </main>
   );
 }
