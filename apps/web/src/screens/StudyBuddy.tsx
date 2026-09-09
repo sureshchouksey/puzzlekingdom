@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bird, Send } from "lucide-react";
+import { ArrowLeft, BookOpenText, Bird, Dices, Laugh, Puzzle as PuzzleIcon, Send } from "lucide-react";
 import { getClassSubjects, getTutorConversation, sendTutorMessage, startTutorConversation } from "../api";
 import type { PkClass, Subject, TutorConversation, TutorMessage, TutorMessageMode, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
@@ -114,10 +114,10 @@ export function StudyBuddy({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function handleSend() {
-    const text = draft.trim();
+  async function handleSend(override?: string) {
+    const text = (override ?? draft).trim();
     if (!text || !conversation || sending) return;
-    setDraft("");
+    if (!override) setDraft("");
     setSending(true);
     setError(null);
     // Shown immediately, before the reply comes back - a real AI reply
@@ -219,6 +219,38 @@ export function StudyBuddy({
           ))}
           <div ref={bottomRef} />
         </section>
+
+        {/* Quick-action chips - a friendly, low-friction way to ask for
+            fun content without typing. Each just sends a short natural-
+            language phrase through the normal chat flow; the backend's
+            NLP intent classifier (tutorIntent.ts) is what actually
+            recognizes it as a "fun_request" and serves it from the
+            fun_content bank - these buttons are a shortcut into that same
+            path, not a separate one. Only shown for the free-chat flow
+            (not the "explain this question" flow, which has its own
+            focused purpose), and hidden once sending is in flight so a
+            child can't double-fire a request. */}
+        {!questionContext && conversation && (
+          <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+            {[
+              { label: "Play a game", icon: Dices, text: "Can we play a game?" },
+              { label: "Riddle", icon: PuzzleIcon, text: "Give me a riddle!" },
+              { label: "Joke", icon: Laugh, text: "Tell me a joke!" },
+              { label: "Tongue twister", icon: BookOpenText, text: "Give me a tongue twister!" },
+            ].map(({ label, icon: Icon, text }) => (
+              <button
+                key={label}
+                type="button"
+                disabled={sending}
+                onClick={() => handleSend(text)}
+                className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-card/80 px-3.5 py-2 text-sm font-medium backdrop-blur transition-transform hover:-translate-y-0.5 hover:border-primary/60 disabled:pointer-events-none disabled:opacity-50"
+              >
+                <Icon className="size-4 text-primary" />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <form
           className="sticky bottom-4 mb-2 flex items-center gap-2 rounded-full border border-border/70 bg-card/90 p-2 backdrop-blur shadow-quest"

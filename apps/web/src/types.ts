@@ -345,6 +345,12 @@ export type TutorConversation = {
   // returns when starting/resuming one.
   subjectName?: string;
   className?: string;
+  // Only present in the response to POST /tutor/conversations, and only
+  // when that call actually created a brand-new conversation (never on
+  // resume) - see tutorProgress.ts's buildGreeting. A warm, progress-aware
+  // opening line the child hasn't seen yet, meant to be shown as the very
+  // first chat bubble.
+  greeting?: string;
 };
 
 export type TutorMessageRole = "student" | "agent";

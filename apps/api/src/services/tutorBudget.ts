@@ -111,6 +111,40 @@ export async function checkTutorBudget(profileId: string): Promise<BudgetCheck> 
  * audit trail turns out to be needed, not something to build speculatively
  * now.
  */
+/**
+ * The lighter counterpart to recordTutorExchange, for the two chat paths
+ * that never touch retrieval/generation at all: a social reply (greeting/
+ * thanks - tutorIntent.ts) or a served fun_content item (funContent.ts).
+ * `studentMessage` is omitted for the one proactive case with no real
+ * student turn to log - the greeting shown when a brand new conversation
+ * starts (tutor.ts's POST /tutor/conversations).
+ */
+export async function recordSimpleTutorExchange(params: {
+  conversationId: string;
+  studentMessage?: string;
+  replyText: string;
+  sourceType: "social" | "fun_content";
+  sourceId?: string;
+}): Promise<void> {
+  const { conversationId, studentMessage, replyText, sourceType, sourceId } = params;
+
+  if (studentMessage) {
+    await db.execute(sql`
+      insert into tutor_messages (conversation_id, role, content)
+      values (${conversationId}, 'student', ${studentMessage})
+    `);
+  }
+
+  await db.execute(sql`
+    insert into tutor_messages (conversation_id, role, content, matched_source_type, matched_source_id)
+    values (${conversationId}, 'agent', ${replyText}, ${sourceType}, ${sourceId ?? null})
+  `);
+
+  await db.execute(sql`
+    update tutor_conversations set last_message_at = now() where id = ${conversationId}
+  `);
+}
+
 export async function recordTutorExchange(params: {
   conversationId: string;
   studentMessage: string;

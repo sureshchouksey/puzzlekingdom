@@ -3,9 +3,12 @@ import { eq, and, desc, gte } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { classes, subjects, tutorConversations, tutorMessages } from "../db/schema.js";
 import { requireIdentity } from "../auth.js";
-import { checkTutorBudget, recordTutorExchange } from "../services/tutorBudget.js";
+import { checkTutorBudget, recordTutorExchange, recordSimpleTutorExchange } from "../services/tutorBudget.js";
 import { retrieveForQuery, retrieveForQuestion } from "../services/tutorRetrieval.js";
 import { generateTutorReply } from "../services/tutorGeneration.js";
+import { classifyTutorIntent } from "../services/tutorIntent.js";
+import { getRandomFunContent, formatFunContentReply } from "../services/funContent.js";
+import { buildGreeting } from "../services/tutorProgress.js";
 
 // The AI Study Mentor's actual routes - see plan/AI-Study-Mentor-Agent-Plan.md,
 // Section 9 and Section 10 step 6. Every real decision (what counts as a
@@ -25,6 +28,27 @@ import { generateTutorReply } from "../services/tutorGeneration.js";
 const DAILY_CAP_REPLY =
   "You've used up your Study Buddy chats for today! Come back tomorrow and I'll be ready to help again.";
 const TUTOR_DISABLED_REPLY = "Study Buddy isn't available right now. Ask a grown-up if you'd like to know more.";
+
+// Mid-conversation greeting/thanks replies - deliberately NOT a Gemini
+// call (unlike the once-per-conversation opening greeting in
+// buildGreeting), since these are cheap, low-stakes social turns that
+// don't need to be grounded in anything - a short pool kept so it
+// doesn't feel like the exact same canned line every time. See
+// tutorIntent.ts for how a message is classified as one of these.
+const GREETING_REPLIES = [
+  "Hi again! What would you like to do next - a question about your lessons, or something fun?",
+  "Hello! Good to see you back. Ask me anything, or say the word if you'd rather play.",
+  "Hey there! I'm ready whenever you are - lessons or a bit of fun, your choice.",
+];
+const THANKS_REPLIES = [
+  "You're welcome! Keep up the great work.",
+  "Anytime! I'm really proud of how hard you're trying.",
+  "No problem at all - that's what I'm here for!",
+];
+
+function pickRandom<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)];
+}
 
 export async function tutorRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireIdentity);
@@ -109,7 +133,18 @@ export async function tutorRoutes(app: FastifyInstance) {
         relatedAttemptId: contextType === "question" ? attemptId : undefined,
       })
       .returning();
-    return reply.status(201).send(created);
+
+    // A proactive, real-progress-aware hello - see tutorProgress.ts. Only
+    // ever generated here, on a genuinely NEW conversation (both resume
+    // branches above return early before reaching this point), so it
+    // shows up exactly once in the transcript, not on every resume/reload.
+    // Stored as an 'agent' row with no matching 'student' turn, and also
+    // returned inline so the frontend can render it immediately without a
+    // second round trip.
+    const greeting = await buildGreeting({ profileId: identity.profileId, profileName: identity.name });
+    await recordSimpleTutorExchange({ conversationId: created.id, replyText: greeting, sourceType: "social" });
+
+    return reply.status(201).send({ ...created, greeting });
   });
 
   // The actual chat turn: budget check -> retrieval -> generation ->
@@ -142,6 +177,44 @@ export async function tutorRoutes(app: FastifyInstance) {
       if (!budget.allowed) {
         const replyText = budget.reason === "tutor_disabled" ? TUTOR_DISABLED_REPLY : DAILY_CAP_REPLY;
         return reply.send({ mode: "blocked", reason: budget.reason, reply: replyText });
+      }
+
+      // Intent classification only applies to the free-text "general"
+      // chat - a 'question' conversation's whole point is explaining one
+      // specific wrong answer (its first message is the question text
+      // itself, auto-sent by the frontend), so there's no ambiguity to
+      // resolve and skipping this call keeps that flow both faster and
+      // immune to a misclassification derailing it. See tutorIntent.ts.
+      if (conversation.contextType === "general") {
+        const intent = await classifyTutorIntent(message);
+
+        if (intent.kind === "greeting" || intent.kind === "thanks") {
+          const replyText = pickRandom(intent.kind === "greeting" ? GREETING_REPLIES : THANKS_REPLIES);
+          await recordSimpleTutorExchange({
+            conversationId: conversation.id,
+            studentMessage: message,
+            replyText,
+            sourceType: "social",
+          });
+          return reply.send({ mode: "template", reply: replyText });
+        }
+
+        if (intent.kind === "fun_request") {
+          const item = await getRandomFunContent({ contentType: intent.contentType, subject: intent.subject });
+          const replyText = item
+            ? formatFunContentReply(item)
+            : "I don't have any of those saved up yet - ask a grown-up to add some to Puzzle Kingdom!";
+          await recordSimpleTutorExchange({
+            conversationId: conversation.id,
+            studentMessage: message,
+            replyText,
+            sourceType: item ? "fun_content" : "social",
+            sourceId: item?.id,
+          });
+          return reply.send({ mode: "template", reply: replyText });
+        }
+        // intent.kind === "academic" falls through to the existing
+        // retrieval -> generation pipeline below, unchanged.
       }
 
       const retrieval =

@@ -285,6 +285,29 @@ export const tutorMessagesRelations = relations(tutorMessages, ({ one }) => ({
   conversation: one(tutorConversations, { fields: [tutorMessages.conversationId], references: [tutorConversations.id] }),
 }));
 
+// A small, hand-curated bank of tongue twisters, riddles, jokes,
+// multi-step puzzles, and subject trivia the Study Buddy chat can serve
+// when a child wants to play rather than ask a curriculum question - see
+// migration 0013 and tutorIntent.ts/funContent.ts. Seeded by
+// scripts/seed-fun-content.ts; this table starts empty, same convention
+// as conceptGuides.
+export const funContent = pgTable("fun_content", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // 'tongue_twister' | 'riddle' | 'joke' | 'puzzle' | 'trivia' - enforced
+  // by migration 0013's check constraint, not a Drizzle/Postgres enum,
+  // matching this project's existing free-text-tag convention (e.g.
+  // tutorConversations.contextType) rather than introducing its first
+  // real enum type.
+  contentType: text("content_type").notNull(),
+  // Only set for content_type = 'trivia' (e.g. "science", "english").
+  subject: text("subject"),
+  promptText: text("prompt_text").notNull(),
+  // The riddle/puzzle/trivia answer, or a joke's punchline. Null for
+  // tongue twisters.
+  answerText: text("answer_text"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Distilled, parent-facing summaries of what a profile's been asking
 // about - see tutorInsights.ts (Section 10 step 8). One row per
 // (profile, topic), enforced by a unique index (migration 0010) so
