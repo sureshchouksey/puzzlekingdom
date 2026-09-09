@@ -7,7 +7,13 @@ import { checkTutorBudget, recordTutorExchange, recordSimpleTutorExchange } from
 import { retrieveForQuery, retrieveForQuestion } from "../services/tutorRetrieval.js";
 import { generateTutorReply } from "../services/tutorGeneration.js";
 import { classifyTutorIntent } from "../services/tutorIntent.js";
-import { getRandomFunContent, getFunContentById, formatFunContentReply, formatFunContentAnswer } from "../services/funContent.js";
+import {
+  getRandomFunContent,
+  getFunContentById,
+  formatFunContentReply,
+  formatFunContentAnswer,
+  formatFunContentHint,
+} from "../services/funContent.js";
 import { buildGreeting } from "../services/tutorProgress.js";
 
 // The AI Study Mentor's actual routes - see plan/AI-Study-Mentor-Agent-Plan.md,
@@ -100,6 +106,25 @@ async function getPendingFunContent(conversationId: string) {
   const item = await getFunContentById(lastMessage.sourceId);
   if (!item || !item.answerText) return null;
   return { ...item, offeredReveal: lastMessage.sourceType === "reveal_offer" };
+}
+
+// Which riddle/joke/puzzle/trivia question is the child asking about when
+// they say "what's the answer" or "give me a hint"? Deliberately more
+// lenient than getPendingFunContent above: this searches the WHOLE
+// conversation history for the most recent fun_content item actually
+// served, not just the very last message - a reveal or hint request
+// still needs to resolve correctly even after other turns (an incorrect
+// guess's own feedback, a previous hint) have happened since the
+// question was first asked. Returns null if nothing fun_content has been
+// sent yet in this conversation.
+async function findMostRecentFunContentItem(conversationId: string) {
+  const [lastFunMessage] = await db
+    .select({ sourceId: tutorMessages.matchedSourceId })
+    .from(tutorMessages)
+    .where(and(eq(tutorMessages.conversationId, conversationId), eq(tutorMessages.matchedSourceType, "fun_content")))
+    .orderBy(desc(tutorMessages.createdAt))
+    .limit(1);
+  return lastFunMessage?.sourceId ? await getFunContentById(lastFunMessage.sourceId) : null;
 }
 
 export async function tutorRoutes(app: FastifyInstance) {
@@ -273,20 +298,12 @@ export async function tutorRoutes(app: FastifyInstance) {
         }
 
         if (intent.kind === "reveal_answer") {
-          // Find the most recent fun_content this conversation actually
-          // served - formatFunContentReply deliberately withholds the
-          // answer up front (see its own doc comment), so "what's the
-          // answer"/"I give up" needs to look back at whichever
-          // riddle/joke/puzzle/trivia question was sent last to know
-          // which answer to give. If nothing fun_content has been sent
-          // yet in this conversation, there's nothing to reveal.
-          const [lastFunMessage] = await db
-            .select({ sourceId: tutorMessages.matchedSourceId })
-            .from(tutorMessages)
-            .where(and(eq(tutorMessages.conversationId, conversation.id), eq(tutorMessages.matchedSourceType, "fun_content")))
-            .orderBy(desc(tutorMessages.createdAt))
-            .limit(1);
-          const item = lastFunMessage?.sourceId ? await getFunContentById(lastFunMessage.sourceId) : null;
+          // formatFunContentReply deliberately withholds the answer up
+          // front (see its own doc comment), so "what's the answer"/"I
+          // give up" needs to look back at whichever riddle/joke/puzzle/
+          // trivia question was sent last to know which answer to give -
+          // findMostRecentFunContentItem below does that lookup.
+          const item = await findMostRecentFunContentItem(conversation.id);
           const replyText = item
             ? formatFunContentAnswer(item)
             : "I haven't asked you a riddle, joke, or puzzle yet this chat - want one? Just ask!";
@@ -300,6 +317,34 @@ export async function tutorRoutes(app: FastifyInstance) {
             // next message is classified fresh rather than re-checked as
             // another guess at a question they've already been told.
             sourceType: "social",
+          });
+          return reply.send({ mode: "template", reply: replyText });
+        }
+
+        if (intent.kind === "hint_request") {
+          // Same lookup as reveal_answer above - a hint is about the same
+          // "which question are they asking about" question, it just gets
+          // formatted as a nudge instead of the full answer (see
+          // formatFunContentHint's own doc comment for why these are kept
+          // separate replies rather than collapsing hint_request into
+          // reveal_answer).
+          const item = await findMostRecentFunContentItem(conversation.id);
+          const replyText = item
+            ? formatFunContentHint(item)
+            : "I haven't asked you a riddle, joke, or puzzle yet this chat - want one? Just ask!";
+          await recordSimpleTutorExchange({
+            conversationId: conversation.id,
+            studentMessage: message,
+            replyText,
+            // Unlike reveal_answer, a hint should NOT close the pending
+            // window - the child is still expected to guess again, so
+            // this reopens (or keeps open) the same 'fun_content' pending
+            // state as the original question (offeredReveal: false, since
+            // a hint isn't the "want a hint, or the answer?" offer
+            // itself). Falls back to 'social' when there was nothing to
+            // hint at in the first place.
+            sourceType: item ? "fun_content" : "social",
+            sourceId: item?.id,
           });
           return reply.send({ mode: "template", reply: replyText });
         }

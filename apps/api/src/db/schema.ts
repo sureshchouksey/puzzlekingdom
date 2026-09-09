@@ -305,6 +305,12 @@ export const funContent = pgTable("fun_content", {
   // The riddle/puzzle/trivia answer, or a joke's punchline. Null for
   // tongue twisters.
   answerText: text("answer_text"),
+  // A gentle nudge toward the answer, shown when a child asks for a hint
+  // instead of the full answer (migration 0015, tutorIntent.ts's
+  // hint_request intent) - null for tongue twisters (nothing to hint at)
+  // and for any answerable item that hasn't been given one yet;
+  // funContent.ts's formatFunContentHint degrades gracefully either way.
+  hintText: text("hint_text"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -42,6 +42,14 @@ export type TutorIntent =
   // the most recent fun_content message in this conversation to know
   // which one to reveal.
   | { kind: "reveal_answer" }
+  // The child wants a nudge toward the answer, short of being told it
+  // outright - see funContent.ts's formatFunContentHint and migration
+  // 0015. Kept distinct from reveal_answer (which gives the whole thing
+  // away) so "I want a hint" and "just tell me the answer" get genuinely
+  // different replies, matching what tutor.ts's own INCORRECT_GUESS_REPLIES
+  // offers after a wrong guess ("want a hint, or should I tell you the
+  // answer?").
+  | { kind: "hint_request" }
   // The child appears to be answering the riddle/joke/puzzle/trivia
   // question that's still outstanding (see tutor.ts's getPendingFunContent)
   // - `correct` says whether their guess matches the pending answer,
@@ -55,7 +63,7 @@ const FUN_CONTENT_TYPES = ["tongue_twister", "riddle", "joke", "puzzle", "trivia
 const TRIVIA_SUBJECTS = ["science", "english", "maths"] as const;
 
 const intentResultSchema = z.object({
-  intent: z.enum(["greeting", "thanks", "fun_request", "reveal_answer", "answer_attempt", "academic_or_other"]),
+  intent: z.enum(["greeting", "thanks", "fun_request", "reveal_answer", "hint_request", "answer_attempt", "academic_or_other"]),
   funContentType: z.enum(FUN_CONTENT_TYPES).optional(),
   subject: z.enum(TRIVIA_SUBJECTS).optional(),
   correct: z.boolean().optional(),
@@ -66,16 +74,18 @@ const INTENT_JSON_SCHEMA = {
   properties: {
     intent: {
       type: "string",
-      enum: ["greeting", "thanks", "fun_request", "reveal_answer", "answer_attempt", "academic_or_other"],
+      enum: ["greeting", "thanks", "fun_request", "reveal_answer", "hint_request", "answer_attempt", "academic_or_other"],
       description:
         "greeting = hello/hi/hey and similar. thanks = thank you or appreciation. fun_request = the child " +
         "wants to play, or asked for a riddle, joke, tongue twister, puzzle/brain-teaser, or a trivia " +
-        "question. reveal_answer = the child is asking to be told the answer to a riddle/joke/puzzle/" +
-        "trivia question they were just asked - giving up, asking outright for the answer, saying they " +
-        "don't know (NOT a guess at the answer itself). answer_attempt = the child appears to be guessing " +
-        "the answer to a riddle/joke/puzzle/trivia question they were just asked - use this ONLY when the " +
-        "prompt below tells you a question is currently outstanding. academic_or_other = an actual " +
-        "question about their schoolwork, or anything else.",
+        "question. reveal_answer = the child is asking to be told the answer outright - giving up, asking " +
+        "outright for the answer, saying they don't know (NOT a guess at the answer itself, and NOT a " +
+        "request for just a hint). hint_request = the child wants a nudge or clue toward the answer, " +
+        "short of being told it outright - e.g. 'give me a hint', 'I want a hint', 'can I have a clue'. " +
+        "answer_attempt = the child appears to be guessing the answer to a riddle/joke/puzzle/trivia " +
+        "question they were just asked - use this ONLY when the prompt below tells you a question is " +
+        "currently outstanding. academic_or_other = an actual question about their schoolwork, or " +
+        "anything else.",
     },
     funContentType: {
       type: "string",
@@ -149,7 +159,8 @@ function buildPrompt(message: string, pending?: PendingFunContent): string {
       "short - use fun_request whenever the child seems to want to play, be entertained, or asked for " +
       "a riddle/joke/tongue twister/puzzle/trivia by name or description, even informally. Use " +
       "reveal_answer for a short give-up/'what's the answer'/'I don't know' reply that only makes sense " +
-      "as a response to something just asked - not for a genuine new question."
+      "as a response to something just asked - not for a genuine new question. Use hint_request instead " +
+      "of reveal_answer when they specifically ask for a hint/clue rather than the answer itself."
   );
   return lines.join("\n");
 }
@@ -184,6 +195,12 @@ const TRIVIA_PATTERN = /\btrivia\b|\bquiz me\b|\btest me\b|\b(ask|give)\s+me\s+(
 const PLAY_PATTERN = /\bplay\b|\bgame\b|\bsomething fun\b|\bbored\b|\bentertain me\b/i;
 const REVEAL_PATTERN =
   /\bgive up\b|\bi give up\b|\bdon'?t know\b|\bdunno\b|\bno idea\b|\bwhat'?s the answer\b|\btell me the answer\b|\bgive me (the\s+)?answer\b|\bwhat is it\b|\breveal\b|\bi can'?t guess\b|\bidk\b/i;
+// A hint request is checked separately from (and before) REVEAL_PATTERN
+// below - "give me a hint" would otherwise never be reached, since
+// nothing in REVEAL_PATTERN mentions hints at all, but keeping this as
+// its own pattern (rather than folding "hint" into REVEAL_PATTERN) is
+// what lets a hint and a full reveal get genuinely different replies.
+const HINT_PATTERN = /\bhints?\b|\bclues?\b/i;
 
 // A bare "yes"/"sure"/"ok" and similar short agreement - only meaningful
 // as "yes, reveal it" when we just offered a hint or the answer (see
@@ -223,6 +240,7 @@ export function heuristicClassifyTutorIntent(message: string, pending?: PendingF
   if (pending?.offeredReveal && AFFIRMATIVE_PATTERN.test(text)) return { kind: "reveal_answer" };
 
   if (REVEAL_PATTERN.test(text)) return { kind: "reveal_answer" };
+  if (HINT_PATTERN.test(text)) return { kind: "hint_request" };
 
   if (RIDDLE_PATTERN.test(text)) return { kind: "fun_request", contentType: "riddle" };
   if (JOKE_PATTERN.test(text)) return { kind: "fun_request", contentType: "joke" };
@@ -281,6 +299,7 @@ export async function classifyTutorIntent(message: string, pending?: PendingFunC
       if (parsed.intent === "greeting") return { kind: "greeting" };
       if (parsed.intent === "thanks") return { kind: "thanks" };
       if (parsed.intent === "reveal_answer") return { kind: "reveal_answer" };
+      if (parsed.intent === "hint_request") return { kind: "hint_request" };
       if (parsed.intent === "answer_attempt") return { kind: "answer_attempt", correct: parsed.correct ?? false };
       if (parsed.intent === "fun_request" && parsed.funContentType) {
         return {

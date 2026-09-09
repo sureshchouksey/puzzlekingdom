@@ -20,6 +20,10 @@ export interface FunContentItem {
   subject: string | null;
   promptText: string;
   answerText: string | null;
+  // A gentle nudge toward the answer - see formatFunContentHint below.
+  // Null for tongue twisters and for any answerable item that hasn't
+  // been given one yet (migration 0015).
+  hintText: string | null;
 }
 
 /**
@@ -59,6 +63,7 @@ export async function getRandomFunContent(params: {
     subject: row.subject,
     promptText: row.promptText,
     answerText: row.answerText,
+    hintText: row.hintText,
   };
 }
 
@@ -78,6 +83,7 @@ export async function getFunContentById(id: string): Promise<FunContentItem | nu
     subject: row.subject,
     promptText: row.promptText,
     answerText: row.answerText,
+    hintText: row.hintText,
   };
 }
 
@@ -116,4 +122,19 @@ export function formatFunContentAnswer(item: FunContentItem): string {
     return "That one doesn't have an answer to reveal - it was just for fun! Want another?";
   }
   return `The answer is... ${item.answerText}`;
+}
+
+/** Formats a hint for one fun_content row, once the child asks for one
+ * instead of the full answer (see tutorIntent.ts's hint_request intent
+ * and tutor.ts's own doc comment on why this is kept distinct from
+ * formatFunContentAnswer above - a hint should nudge, not give it away).
+ * Degrades gracefully when this particular item has no hintText yet
+ * (migration 0015 added the column to an existing table, so older or
+ * not-yet-updated rows can still be null) by falling back to offering the
+ * full answer instead, rather than leaving the child with nothing. */
+export function formatFunContentHint(item: FunContentItem): string {
+  if (!item.hintText) {
+    return "I don't have a hint saved for that one yet - want me to just tell you the answer instead?";
+  }
+  return `Here's a hint: ${item.hintText}`;
 }

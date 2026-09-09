@@ -133,6 +133,30 @@ const CASES: TestCase[] = [
   { label: "reveal: I don't know", message: "I don't know", expectedKind: "reveal_answer" },
   { label: "reveal: idk", message: "idk", expectedKind: "reveal_answer" },
 
+  // --- Hint requests ---
+  {
+    label: "hint: I want a hint, right after a fresh riddle",
+    message: "I want a hint",
+    pending: SPONGE_RIDDLE,
+    expectedKind: "hint_request",
+    note: "regression case - previously fell through to the answer_attempt fallback and got graded as a wrong guess (\"Good try, but that's not it!\") even though the child never guessed anything",
+  },
+  { label: "hint: give me a hint", message: "give me a hint", pending: SPONGE_RIDDLE, expectedKind: "hint_request" },
+  { label: "hint: can I have a clue", message: "can I have a clue?", pending: SPONGE_RIDDLE, expectedKind: "hint_request" },
+  {
+    label: "hint: after already being offered one (offeredReveal true)",
+    message: "hint please",
+    pending: COIN_RIDDLE_OFFERED_REVEAL,
+    expectedKind: "hint_request",
+    note: "a hint request should win out over the offeredReveal-gated affirmative path - 'hint please' isn't a bare yes/sure/ok",
+  },
+  {
+    label: "hint request with no pending question at all",
+    message: "give me a hint",
+    expectedKind: "hint_request",
+    note: "tutor.ts's own lenient findMostRecentFunContentItem lookup (not pending) is what resolves which item to hint at, so this should still classify as hint_request even without a strict pending context - it's an explicit, unambiguous request either way",
+  },
+
   // --- Answer attempts (pending question in context) ---
   { label: "answer: coin, correct, exact", message: "a coin", pending: COIN_RIDDLE, expectedKind: "answer_attempt", expectedCorrect: true },
   { label: "answer: coin, correct, phrased", message: "It's a coin!", pending: COIN_RIDDLE, expectedKind: "answer_attempt", expectedCorrect: true },
