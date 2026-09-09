@@ -1,10 +1,34 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Crown, Trophy } from "lucide-react";
+import { ArrowLeft, Crown, Rocket, Shield, Swords, Trophy, Wand2 } from "lucide-react";
 import { getClasses, getLeaderboard } from "../api";
 import type { LeaderboardEntry, PkClass } from "../types";
 import { Button } from "../components/ui/button";
 
 const PODIUM_TINT = ["text-primary", "text-muted-foreground", "text-ruby"];
+
+// Same avatar id scheme (and icon/color order) Welcome.tsx's picker
+// saves - "prince-3"/"princess-5" - looked up here so a leaderboard row
+// shows the exact avatar a player picked rather than a generic image.
+const AVATAR_JEWELS = ["gold", "sapphire", "ruby", "emerald", "amethyst"] as const;
+type AvatarJewel = (typeof AVATAR_JEWELS)[number];
+const AVATAR_JEWEL_TEXT: Record<AvatarJewel, string> = {
+  gold: "text-primary",
+  sapphire: "text-sapphire",
+  ruby: "text-ruby",
+  emerald: "text-emerald",
+  amethyst: "text-amethyst",
+};
+const AVATAR_ICONS = [Crown, Shield, Swords, Rocket, Wand2] as const;
+
+function avatarFor(avatarId: string | null, title: string | null): { icon: typeof Crown; jewel: AvatarJewel } {
+  const index = avatarId ? Number(avatarId.split("-")[1]) - 1 : -1;
+  if (index >= 0 && index < AVATAR_ICONS.length) {
+    return { icon: AVATAR_ICONS[index], jewel: AVATAR_JEWELS[index] };
+  }
+  // Older profile from before avatar choice existed - fall back to a
+  // generic per-title look instead of nothing.
+  return { icon: Crown, jewel: title === "Princess" ? "amethyst" : "sapphire" };
+}
 
 export function Leaderboard({ onBack }: { onBack: () => void }) {
   const [classes, setClasses] = useState<PkClass[] | null>(null);
@@ -84,11 +108,16 @@ export function Leaderboard({ onBack }: { onBack: () => void }) {
                 <span className="grid w-8 shrink-0 place-items-center text-xl font-display font-extrabold">
                   {i < 3 ? <Crown className={`size-6 ${PODIUM_TINT[i]}`} /> : i + 1}
                 </span>
-                <img
-                  src={e.title === "Princess" ? "/princess.png" : "/prince.png"}
-                  alt={e.title ?? "Player"}
-                  className="size-11 shrink-0 rounded-xl object-cover"
-                />
+                {(() => {
+                  const { icon: AvatarIcon, jewel } = avatarFor(e.avatarId, e.title);
+                  return (
+                    <span
+                      className={`grid size-11 shrink-0 place-items-center rounded-xl border-2 border-border bg-secondary ${AVATAR_JEWEL_TEXT[jewel]}`}
+                    >
+                      <AvatarIcon className="size-5" />
+                    </span>
+                  );
+                })()}
                 <div className="flex-1">
                   <p className="font-display font-bold">{e.name}</p>
                   <p className="text-sm text-muted-foreground">

@@ -123,10 +123,14 @@ export function lookupProfile(name: string): Promise<ProfileLookupResponse> {
 }
 
 // One-time PIN bootstrap for a profile that doesn't have one yet (brand
-// new, or created before PINs existed). `title` is only meaningful the
-// very first time (a genuinely new profile) - the server ignores it if
-// the profile already has a title. Stores the returned token itself.
-export function setProfilePin(profileId: string, params: { pin: string; title?: string }): Promise<ProfileSessionResponse> {
+// new, or created before PINs existed). `title`/`avatarId` are only
+// meaningful the very first time (a genuinely new profile) - the server
+// ignores them if the profile already has a title. Stores the returned
+// token itself.
+export function setProfilePin(
+  profileId: string,
+  params: { pin: string; title?: string; avatarId?: string }
+): Promise<ProfileSessionResponse> {
   return apiFetch(`/profiles/${profileId}/set-pin`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

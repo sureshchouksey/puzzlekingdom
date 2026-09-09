@@ -1,10 +1,33 @@
 import { useState } from "react";
-import { Delete, ShieldHalf, Users } from "lucide-react";
+import { Crown, Delete, Rocket, Shield, ShieldHalf, Swords, Users, Wand2 } from "lucide-react";
 import { lookupProfile, setProfilePin, verifyProfilePin } from "../api";
 import type { Profile, ProfileLookupResponse } from "../types";
 import { Button } from "../components/ui/button";
 
 type Title = "Prince" | "Princess";
+
+const JEWELS = ["gold", "sapphire", "ruby", "emerald", "amethyst"] as const;
+type Jewel = (typeof JEWELS)[number];
+const JEWEL_TEXT: Record<Jewel, string> = {
+  gold: "text-primary",
+  sapphire: "text-sapphire",
+  ruby: "text-ruby",
+  emerald: "text-emerald",
+  amethyst: "text-amethyst",
+};
+
+type AvatarOption = { id: string; title: Title; icon: typeof Crown; jewel: Jewel };
+
+// 5 avatars per title (10 total) - the same icon/color set under each
+// heading, so choosing is about which one looks fun rather than a
+// gendered symbol. `id` (e.g. "prince-3") is what actually gets saved;
+// see profiles.avatarId on the backend.
+const AVATAR_ICONS = [Crown, Shield, Swords, Rocket, Wand2] as const;
+function buildAvatars(title: Title): AvatarOption[] {
+  return AVATAR_ICONS.map((icon, i) => ({ id: `${title.toLowerCase()}-${i + 1}`, title, icon, jewel: JEWELS[i] }));
+}
+const PRINCE_AVATARS = buildAvatars("Prince");
+const PRINCESS_AVATARS = buildAvatars("Princess");
 
 // Which step of "entering the kingdom" is showing. `looked` holds what
 // POST /profiles just told us about the typed name, so the right next
@@ -20,7 +43,7 @@ type Title = "Prince" | "Princess";
 type Step =
   | { kind: "name" }
   | { kind: "newTitle"; looked: ProfileLookupResponse }
-  | { kind: "setPin"; looked: ProfileLookupResponse; title?: Title }
+  | { kind: "setPin"; looked: ProfileLookupResponse; title?: Title; avatarId?: string }
   | { kind: "verifyPin"; looked: ProfileLookupResponse };
 
 function capitalize(value: string) {
@@ -113,7 +136,7 @@ export function Welcome({
     }
   }
 
-  async function handleSetPin(looked: ProfileLookupResponse, title?: Title) {
+  async function handleSetPin(looked: ProfileLookupResponse, title?: Title, avatarId?: string) {
     if (pin.length !== 4) {
       setError("PIN must be 4 digits");
       return;
@@ -125,7 +148,7 @@ export function Welcome({
     setSubmitting(true);
     setError(null);
     try {
-      const { profile } = await setProfilePin(looked.id, { pin, title });
+      const { profile } = await setProfilePin(looked.id, { pin, title, avatarId });
       onEnter(profile);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to set PIN");
@@ -226,34 +249,37 @@ export function Welcome({
 
           {step.kind === "newTitle" && (
             <>
-              <p className="text-sm text-muted-foreground">
-                Hi {step.looked.name}! Are you a prince or a princess?
-              </p>
-              <div className="mt-6 flex justify-center gap-6">
-                <button
-                  type="button"
-                  onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Prince" })}
-                  className="group flex flex-col items-center gap-2 rounded-2xl p-2 transition-transform hover:-translate-y-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                >
-                  <img
-                    src="/prince.png"
-                    alt="Prince"
-                    className="size-32 rounded-2xl border-2 border-border object-cover shadow-inner transition-colors group-hover:border-primary/60"
-                  />
-                  <span className="font-display font-semibold">Prince</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStep({ kind: "setPin", looked: step.looked, title: "Princess" })}
-                  className="group flex flex-col items-center gap-2 rounded-2xl p-2 transition-transform hover:-translate-y-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                >
-                  <img
-                    src="/princess.png"
-                    alt="Princess"
-                    className="size-32 rounded-2xl border-2 border-border object-cover shadow-inner transition-colors group-hover:border-primary/60"
-                  />
-                  <span className="font-display font-semibold">Princess</span>
-                </button>
+              <p className="text-sm text-muted-foreground">Hi {step.looked.name}! Pick your avatar.</p>
+              <div className="mt-6 space-y-6 text-left">
+                {(
+                  [
+                    { title: "Prince" as const, avatars: PRINCE_AVATARS },
+                    { title: "Princess" as const, avatars: PRINCESS_AVATARS },
+                  ]
+                ).map((group) => (
+                  <div key={group.title}>
+                    <p className="mb-3 text-center text-xs font-semibold tracking-[0.2em] text-muted-foreground uppercase">
+                      {group.title}
+                    </p>
+                    <div className="grid grid-cols-5 gap-2">
+                      {group.avatars.map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          onClick={() => setStep({ kind: "setPin", looked: step.looked, title: a.title, avatarId: a.id })}
+                          aria-label={`${a.title} avatar ${a.id.split("-")[1]}`}
+                          className="group flex items-center justify-center rounded-2xl p-1 transition-transform hover:-translate-y-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        >
+                          <span
+                            className={`grid size-12 place-items-center rounded-full border-2 border-border bg-secondary shadow-inner transition-colors group-hover:border-primary/60 sm:size-14 ${JEWEL_TEXT[a.jewel]}`}
+                          >
+                            <a.icon className="size-6" />
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </>
           )}
@@ -262,7 +288,7 @@ export function Welcome({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                handleSetPin(step.looked, step.title);
+                handleSetPin(step.looked, step.title, step.avatarId);
               }}
             >
               <p className="text-sm text-muted-foreground">

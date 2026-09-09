@@ -24,6 +24,7 @@ export async function leaderboardRoutes(app: FastifyInstance) {
       profile_id: string;
       name: string;
       title: string | null;
+      avatar_id: string | null;
       quizzes_played: number;
       stages_cleared: number;
       questions_answered: number;
@@ -52,6 +53,7 @@ export async function leaderboardRoutes(app: FastifyInstance) {
         p.id as profile_id,
         p.name,
         p.title,
+        p.avatar_id,
         coalesce(attempt_agg.quizzes_played, 0) as quizzes_played,
         coalesce(attempt_agg.stages_cleared, 0) as stages_cleared,
         coalesce(answer_agg.questions_answered, 0) as questions_answered,
@@ -69,6 +71,7 @@ export async function leaderboardRoutes(app: FastifyInstance) {
       profileId: r.profile_id,
       name: r.name,
       title: r.title,
+      avatarId: r.avatar_id,
       quizzesPlayed: Number(r.quizzes_played),
       stagesCleared: Number(r.stages_cleared),
       questionsAnswered: Number(r.questions_answered),

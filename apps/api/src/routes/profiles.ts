@@ -9,7 +9,7 @@ const PIN_PATTERN = /^\d{4}$/;
 // Strips pin_hash (and anything else internal) before a profile ever goes
 // back to a client - the hash should never leave the server.
 function publicProfile(p: typeof profiles.$inferSelect) {
-  return { id: p.id, name: p.name, title: p.title };
+  return { id: p.id, name: p.name, title: p.title, avatarId: p.avatarId };
 }
 
 // Lightweight named player profiles, now with a real 4-digit PIN each -
@@ -47,12 +47,13 @@ export async function profileRoutes(app: FastifyInstance) {
   // set, this route 409s forever after, so it can never be used to
   // overwrite someone else's PIN just by knowing their profile id. `title`
   // is optional and only applied if the profile doesn't already have one
-  // (the prince/princess pick, for a genuinely new profile).
-  app.post<{ Params: { id: string }; Body: { pin?: string; title?: string } }>(
+  // (the prince/princess + avatar pick, for a genuinely new profile).
+  app.post<{ Params: { id: string }; Body: { pin?: string; title?: string; avatarId?: string } }>(
     "/profiles/:id/set-pin",
     async (request, reply) => {
       const pin = request.body?.pin;
       const title = request.body?.title?.trim() || undefined;
+      const avatarId = request.body?.avatarId?.trim() || undefined;
       if (!pin || !PIN_PATTERN.test(pin)) {
         return reply.status(400).send({ error: "pin must be exactly 4 digits" });
       }
@@ -66,7 +67,7 @@ export async function profileRoutes(app: FastifyInstance) {
       const pinHash = await bcrypt.hash(pin, 10);
       const [updated] = await db
         .update(profiles)
-        .set({ pinHash, title: profile.title ?? title })
+        .set({ pinHash, title: profile.title ?? title, avatarId: profile.avatarId ?? avatarId })
         .where(eq(profiles.id, profile.id))
         .returning();
 

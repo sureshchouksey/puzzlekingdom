@@ -17,6 +17,9 @@ export type Profile = {
   id: string;
   name: string;
   title: string | null;
+  // Which of the 5 per-title avatars was picked (e.g. "prince-3") - null
+  // for profiles created before avatar choice existed. See Welcome.tsx.
+  avatarId: string | null;
 };
 
 export type QuizOption = {
@@ -233,6 +236,7 @@ export type LeaderboardEntry = {
   profileId: string;
   name: string;
   title: string | null;
+  avatarId: string | null;
   quizzesPlayed: number;
   stagesCleared: number;
   questionsAnswered: number;

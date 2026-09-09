@@ -30,6 +30,11 @@ export const profiles = pgTable("profiles", {
   // Cosmetic only ("Prince" / "Princess", matching the Welcome screen) -
   // free text rather than an enum since it's purely decorative.
   title: text("title"),
+  // Which specific avatar (of 5 per title) the player picked at Welcome,
+  // e.g. "prince-3" - free text, same convention as `title`. Null for
+  // profiles created before avatar choice existed; Welcome.tsx/
+  // Leaderboard.tsx fall back to a generic per-title look when null.
+  avatarId: text("avatar_id"),
   // A 4-digit PIN (bcrypt-hashed), set once by POST /profiles/:id/set-pin
   // and thereafter checked by POST /profiles/:id/verify-pin - this is what
   // makes a profile a real per-child login rather than just a name anyone
