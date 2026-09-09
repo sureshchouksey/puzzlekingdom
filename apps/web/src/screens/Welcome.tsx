@@ -3,27 +3,10 @@ import { Delete, ShieldHalf, Users } from "lucide-react";
 import { lookupProfile, setProfilePin, verifyProfilePin } from "../api";
 import type { Profile, ProfileLookupResponse } from "../types";
 import { Button } from "../components/ui/button";
+import { PRINCE_AVATARS, PRINCESS_AVATARS, type Title } from "../avatars";
 
-type Title = "Prince" | "Princess";
-
-type AvatarOption = { id: string; title: Title; file: string };
-
-// 5 avatars per title (10 total), drawn from the Multiavatar character
-// portraits added to public/ - see plan/Puzzle-Kingdom-Master-Roadmap.md
-// for how the boy/girl split was picked (visual review of all 12; the
-// set skewed adult/male, so a couple of the least "corporate-looking"
-// options were used to round Prince out to 5). `id` is the Multiavatar
-// seed (e.g. "amit") - that's what actually gets saved as
-// profiles.avatarId, and it's combined with the `/Multiavatar-<seed>.png`
-// filename convention wherever an avatar is rendered (here and in
-// Leaderboard.tsx).
-const PRINCE_AVATAR_IDS = ["amit", "r", "rabi", "sun", "pri"];
-const PRINCESS_AVATAR_IDS = ["Aranya", "priyank", "suj", "jo", "su"];
-function buildAvatars(title: Title, ids: string[]): AvatarOption[] {
-  return ids.map((id) => ({ id, title, file: `/Multiavatar-${id}.png` }));
-}
-const PRINCE_AVATARS = buildAvatars("Prince", PRINCE_AVATAR_IDS);
-const PRINCESS_AVATARS = buildAvatars("Princess", PRINCESS_AVATAR_IDS);
+// PRINCE_AVATARS/PRINCESS_AVATARS now live in ../avatars.ts - shared
+// with Leaderboard.tsx so the two can't drift out of sync.
 
 // Which step of "entering the kingdom" is showing. `looked` holds what
 // POST /profiles just told us about the typed name, so the right next

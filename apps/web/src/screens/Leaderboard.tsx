@@ -3,17 +3,17 @@ import { ArrowLeft, Crown, Trophy } from "lucide-react";
 import { getClasses, getLeaderboard } from "../api";
 import type { LeaderboardEntry, PkClass } from "../types";
 import { Button } from "../components/ui/button";
+import { avatarFile } from "../avatars";
 
 const PODIUM_TINT = ["text-primary", "text-muted-foreground", "text-ruby"];
 
-// Same avatar id scheme Welcome.tsx's picker saves - the Multiavatar
-// seed (e.g. "amit") - looked up here so a leaderboard row shows the
-// exact avatar a player picked rather than a generic image. Older
-// profiles from before avatar choice existed (avatarId null) fall back
-// to the old single generic image per title.
+// Looks up the exact avatar image Welcome.tsx's picker saved (shared
+// list in ../avatars.ts, so the two can't drift out of sync) so a
+// leaderboard row shows the real picture a player picked rather than a
+// generic one. Falls back to the old single generic image per title for
+// older profiles (avatarId null) or a since-retired id.
 function avatarSrc(avatarId: string | null, title: string | null): string {
-  if (avatarId) return `/Multiavatar-${avatarId}.png`;
-  return title === "Princess" ? "/princess.png" : "/prince.png";
+  return avatarFile(avatarId) ?? (title === "Princess" ? "/princess.png" : "/prince.png");
 }
 
 export function Leaderboard({ onBack }: { onBack: () => void }) {
