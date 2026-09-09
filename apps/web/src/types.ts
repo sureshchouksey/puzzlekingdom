@@ -215,6 +215,10 @@ export type LeaderboardEntry = {
   title: string | null;
   quizzesPlayed: number;
   stagesCleared: number;
+  // The ranking metric (Question-Types-and-Content-Authoring-Plan.md's
+  // "Competitive framing" section) - summed across every quiz attempt's
+  // stars_earned. Entries already arrive sorted by this, highest first.
+  starsEarned: number;
   questionsAnswered: number;
   questionsCorrect: number;
   accuracy: number | null;

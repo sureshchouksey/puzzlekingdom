@@ -78,13 +78,17 @@ export function Leaderboard({ onBack }: { onBack: () => void }) {
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 700 }}>{e.name}</div>
                 <div style={{ ...styles.muted, fontSize: 13 }}>
-                  {e.quizzesPlayed} {e.quizzesPlayed === 1 ? "quiz" : "quizzes"} ·{" "}
+                  {e.quizzesPlayed} {e.quizzesPlayed === 1 ? "quiz" : "quizzes"} · {e.stagesCleared}{" "}
+                  {e.stagesCleared === 1 ? "stage" : "stages"} cleared ·{" "}
                   {e.accuracy === null ? "—" : `${Math.round(e.accuracy * 100)}% accuracy`}
                 </div>
               </div>
               <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 20, fontWeight: 700, color: "#1a3c6e" }}>{e.stagesCleared}</div>
-                <div style={{ ...styles.muted, fontSize: 12 }}>stages cleared</div>
+                {/* The ranking metric itself (see api.ts/types.ts) - rows
+                    already arrive sorted by this, so it's what should be
+                    prominent, not stagesCleared. */}
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#1a3c6e" }}>⭐ {e.starsEarned}</div>
+                <div style={{ ...styles.muted, fontSize: 12 }}>stars earned</div>
               </div>
             </div>
           ))}
