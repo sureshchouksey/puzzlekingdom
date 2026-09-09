@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Check, MessageCircle, PartyPopper, Sparkles } from "lucide-react";
+import { ArrowLeft, Check, MessageCircle, PartyPopper, Sparkles } from "lucide-react";
 import { submitStage } from "../api";
 import type { AssembleQuizResponse, QuizQuestion, SubmitStageResponse, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
@@ -38,10 +38,17 @@ const LETTERS = "ABCDEFGH";
 
 export function Quiz({
   quiz,
+  onExit,
   onSubmitted,
   onExplain,
 }: {
   quiz: AssembleQuizResponse;
+  // Lets the player back out mid-quiz - e.g. to pick a different topic or
+  // subject. Safe at any point: an answer is only ever saved once "Finish
+  // stage" is clicked and passes (see finishStage below and the backend's
+  // own comment on /quizzes/:id/submit), so leaving before that discards
+  // nothing that was ever persisted in the first place.
+  onExit: () => void;
   onSubmitted: (attemptId: string) => void;
   // "Explain this to me" on a wrong answer - Section 10 step 7. Only
   // wired up when quiz.classId is actually set (see AssembleQuizResponse)
@@ -111,16 +118,22 @@ export function Quiz({
       <main className="night-sky relative min-h-screen overflow-hidden pb-16">
         <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
         <div className="relative mx-auto w-full max-w-2xl px-6 py-10">
-          <header className="text-center">
-            <span className="animate-float shadow-glow mx-auto grid size-20 place-items-center rounded-full bg-primary text-primary-foreground">
-              {stageResult.passed ? <PartyPopper className="size-9" /> : <Sparkles className="size-9" />}
-            </span>
-            <h1 className="mt-4 text-3xl">
-              {stageResult.passed ? `Stage ${stageResult.stagesCleared} cleared!` : "Not quite — give this stage another go"}
-            </h1>
-            <p className="mt-1 text-muted-foreground">
-              {stageResult.stageScore} / {stageResult.stageTotal} correct this stage ({stagePercent}%)
-            </p>
+          <header className="flex items-center justify-between gap-4">
+            <Button variant="ghost" size="icon" className="rounded-full" onClick={onExit} aria-label="Exit quiz">
+              <ArrowLeft className="size-5" />
+            </Button>
+            <div className="flex-1 text-center">
+              <span className="animate-float shadow-glow mx-auto grid size-20 place-items-center rounded-full bg-primary text-primary-foreground">
+                {stageResult.passed ? <PartyPopper className="size-9" /> : <Sparkles className="size-9" />}
+              </span>
+              <h1 className="mt-4 text-3xl">
+                {stageResult.passed ? `Stage ${stageResult.stagesCleared} cleared!` : "Not quite — give this stage another go"}
+              </h1>
+              <p className="mt-1 text-muted-foreground">
+                {stageResult.stageScore} / {stageResult.stageTotal} correct this stage ({stagePercent}%)
+              </p>
+            </div>
+            <span className="size-9" />
           </header>
 
           <div className="mt-8 rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest">
@@ -231,11 +244,17 @@ export function Quiz({
     <main className="night-sky relative min-h-screen overflow-hidden pb-24">
       <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
       <div className="relative mx-auto w-full max-w-2xl px-6 py-8">
-        <header className="text-center">
-          <p className="text-xs font-semibold tracking-[0.28em] text-primary/80 uppercase">{quiz.subjectName}</p>
-          <h1 className="text-2xl sm:text-3xl">
-            Stage {currentStageIndex + 1} of {stages.length}
-          </h1>
+        <header className="flex items-center justify-between gap-4">
+          <Button variant="ghost" size="icon" className="rounded-full" onClick={onExit} aria-label="Exit quiz">
+            <ArrowLeft className="size-5" />
+          </Button>
+          <div className="text-center">
+            <p className="text-xs font-semibold tracking-[0.28em] text-primary/80 uppercase">{quiz.subjectName}</p>
+            <h1 className="text-2xl sm:text-3xl">
+              Stage {currentStageIndex + 1} of {stages.length}
+            </h1>
+          </div>
+          <span className="size-9" />
         </header>
 
         <div className="mx-auto mt-6 flex max-w-sm items-center gap-2">

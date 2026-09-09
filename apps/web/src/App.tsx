@@ -102,6 +102,7 @@ export default function App() {
       return (
         <Quiz
           quiz={screen.quiz}
+          onExit={() => setScreen(lastClass ? { name: "subjectPicker", pkClass: lastClass } : { name: "classPicker" })}
           onSubmitted={(attemptId) => setScreen({ name: "results", attemptId, journey: screen.journey })}
           onExplain={(questionContext) => setScreen({ name: "studyBuddy", questionContext })}
         />
