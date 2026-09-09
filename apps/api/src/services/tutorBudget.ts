@@ -30,6 +30,11 @@ export interface AppSettings {
   tutorEnabled: boolean;
   tutorDailyCapPerProfile: number;
   tutorSharedDailyBudget: number | null;
+  // Custom Gemini's ported "Resource Access" toggles (migration 0015) -
+  // see that migration's comment. tutorEnabled above is the "Gemini"
+  // equivalent; there's no separate column for it.
+  tutorUseConceptGuides: boolean;
+  tutorUseCache: boolean;
 }
 
 // Matches the migration's own defaults - used only if app_settings'
@@ -42,6 +47,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   tutorEnabled: true,
   tutorDailyCapPerProfile: 30,
   tutorSharedDailyBudget: null,
+  tutorUseConceptGuides: true,
+  tutorUseCache: true,
 };
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -49,7 +56,9 @@ export async function getAppSettings(): Promise<AppSettings> {
     select
       tutor_enabled as "tutorEnabled",
       tutor_daily_cap_per_profile as "tutorDailyCapPerProfile",
-      tutor_shared_daily_budget as "tutorSharedDailyBudget"
+      tutor_shared_daily_budget as "tutorSharedDailyBudget",
+      tutor_use_concept_guides as "tutorUseConceptGuides",
+      tutor_use_cache as "tutorUseCache"
     from app_settings
     where id = true
     limit 1

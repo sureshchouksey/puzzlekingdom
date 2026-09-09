@@ -303,6 +303,11 @@ export const appSettings = pgTable("app_settings", {
   tutorEnabled: boolean("tutor_enabled").notNull().default(true),
   tutorDailyCapPerProfile: integer("tutor_daily_cap_per_profile").notNull().default(30),
   tutorSharedDailyBudget: integer("tutor_shared_daily_budget"),
+  // Custom Gemini's ported "Resource Access" toggles (migration 0015) -
+  // see that migration's comment for why there are only two new columns,
+  // not three. tutorEnabled above already serves as the "Gemini" switch.
+  tutorUseConceptGuides: boolean("tutor_use_concept_guides").notNull().default(true),
+  tutorUseCache: boolean("tutor_use_cache").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

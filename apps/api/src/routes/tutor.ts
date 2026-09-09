@@ -3,9 +3,10 @@ import { eq, and, desc, gte } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { classes, subjects, tutorConversations, tutorMessages } from "../db/schema.js";
 import { requireIdentity } from "../auth.js";
-import { checkTutorBudget, recordTutorExchange } from "../services/tutorBudget.js";
-import { retrieveForQuery, retrieveForQuestion } from "../services/tutorRetrieval.js";
-import { generateTutorReply } from "../services/tutorGeneration.js";
+import { checkTutorBudget, recordTutorExchange, getAppSettings } from "../services/tutorBudget.js";
+import { retrieveForQuery, retrieveForQuestion, type RetrievalResult } from "../services/tutorRetrieval.js";
+import { generateTutorReply, type TutorReply } from "../services/tutorGeneration.js";
+import { getCachedTutorReply } from "../services/tutorCache.js";
 
 // The AI Study Mentor's actual routes - see plan/AI-Study-Mentor-Agent-Plan.md,
 // Section 9 and Section 10 step 6. Every real decision (what counts as a
@@ -138,14 +139,27 @@ export async function tutorRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Conversation not found." });
       }
 
+      const settings = await getAppSettings();
+
       const budget = await checkTutorBudget(conversation.profileId);
       if (!budget.allowed) {
         const replyText = budget.reason === "tutor_disabled" ? TUTOR_DISABLED_REPLY : DAILY_CAP_REPLY;
         return reply.send({ mode: "blocked", reason: budget.reason, reply: replyText });
       }
 
-      const retrieval =
-        conversation.contextType === "question"
+      // "Concept Guides" resource-access toggle (migration 0015, ported
+      // from Custom Gemini's app.py) - gates retrieval itself. When off,
+      // there is nothing to ground a reply in, so this deliberately
+      // yields the same { matched: false } shape retrieval itself
+      // returns for a genuine no-match, rather than adding a second code
+      // path - generateTutorReply below already turns that into the
+      // honest template fallback. See migration 0015's own comment on
+      // why this preserves "refuse rather than guess" instead of letting
+      // Gemini answer ungrounded, which is a deliberate departure from
+      // Custom Gemini's own (less strict) behavior for this toggle.
+      const retrieval: RetrievalResult = !settings.tutorUseConceptGuides
+        ? { matched: false, sources: [] }
+        : conversation.contextType === "question"
           ? await retrieveForQuestion({
               questionId: conversation.relatedQuestionId!,
               classId: conversation.classId,
@@ -157,7 +171,25 @@ export async function tutorRoutes(app: FastifyInstance) {
               subjectId: conversation.subjectId,
             });
 
-      const tutorReply = await generateTutorReply({ queryText: message, retrieval });
+      // "Cached answers" resource-access toggle (migration 0015) - reuse
+      // a prior AI reply for this exact question instead of spending
+      // another Gemini call. Only worth checking when retrieval actually
+      // found something to answer from (see tutorCache.ts).
+      let tutorReply: TutorReply | null = null;
+      if (retrieval.matched && settings.tutorUseCache) {
+        const cached = await getCachedTutorReply({
+          profileId: conversation.profileId,
+          classId: conversation.classId,
+          subjectId: conversation.subjectId,
+          message,
+        });
+        if (cached) {
+          tutorReply = { mode: "ai", reply: cached, groundedSourceIds: retrieval.sources.map((s) => s.id) };
+        }
+      }
+      if (!tutorReply) {
+        tutorReply = await generateTutorReply({ queryText: message, retrieval });
+      }
 
       await recordTutorExchange({
         conversationId: conversation.id,

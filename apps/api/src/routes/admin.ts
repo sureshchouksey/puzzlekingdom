@@ -24,6 +24,10 @@ const settingsWriteSchema = z.object({
   tutorEnabled: z.boolean().optional(),
   tutorDailyCapPerProfile: z.number().int().positive().optional(),
   tutorSharedDailyBudget: z.number().int().positive().nullable().optional(),
+  // Custom Gemini's ported "Resource Access" toggles (migration 0015) -
+  // see that migration's comment.
+  tutorUseConceptGuides: z.boolean().optional(),
+  tutorUseCache: z.boolean().optional(),
 });
 
 // Body shape for creating/editing one question by hand from the admin
@@ -466,6 +470,8 @@ export async function adminRoutes(app: FastifyInstance) {
       tutorDailyCapPerProfile: body.tutorDailyCapPerProfile ?? current.tutorDailyCapPerProfile,
       tutorSharedDailyBudget:
         body.tutorSharedDailyBudget !== undefined ? body.tutorSharedDailyBudget : current.tutorSharedDailyBudget,
+      tutorUseConceptGuides: body.tutorUseConceptGuides ?? current.tutorUseConceptGuides,
+      tutorUseCache: body.tutorUseCache ?? current.tutorUseCache,
     };
 
     await db.execute(sql`
@@ -474,6 +480,8 @@ export async function adminRoutes(app: FastifyInstance) {
         tutor_enabled = ${next.tutorEnabled},
         tutor_daily_cap_per_profile = ${next.tutorDailyCapPerProfile},
         tutor_shared_daily_budget = ${next.tutorSharedDailyBudget},
+        tutor_use_concept_guides = ${next.tutorUseConceptGuides},
+        tutor_use_cache = ${next.tutorUseCache},
         updated_at = now()
       where id = true
     `);
