@@ -4,25 +4,6 @@ import { submitStage } from "../api";
 import type { AssembleQuizResponse, QuizQuestion, SubmitStageResponse, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
 
-// Groups a stage's questions by their source document, in first-appearance
-// order, so a passage-based document's story is only shown once, before
-// all of its questions - rather than repeating it, or showing questions
-// with no context at all.
-function groupByDocument(qs: QuizQuestion[]): { documentId: string; passage: string | null; questions: QuizQuestion[] }[] {
-  const groups: { documentId: string; passage: string | null; questions: QuizQuestion[] }[] = [];
-  const indexByDocument = new Map<string, number>();
-  for (const q of qs) {
-    let idx = indexByDocument.get(q.documentId);
-    if (idx === undefined) {
-      idx = groups.length;
-      indexByDocument.set(q.documentId, idx);
-      groups.push({ documentId: q.documentId, passage: q.passage, questions: [] });
-    }
-    groups[idx].questions.push(q);
-  }
-  return groups;
-}
-
 // Splits the (already randomized) question list into fixed-size stages,
 // positionally - the same chunking the backend uses to compute
 // stagesCleared, so both sides always agree on what "stage N" means.
@@ -70,7 +51,13 @@ export function Quiz({
   const [stageResult, setStageResult] = useState<SubmitStageResponse | null>(null);
 
   const currentStage = stages[currentStageIndex] ?? [];
-  const groups = useMemo(() => groupByDocument(currentStage), [currentStage]);
+  // One question shown at a time on-screen (mobile-friendly) - this tracks
+  // which question within the current stage is showing, separately from
+  // currentStageIndex which tracks which stage.
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const question = currentStage[currentQuestionIndex];
+  const isAnswered = question ? !!selections[question.id] : false;
+  const isLastQuestion = currentQuestionIndex === currentStage.length - 1;
   const allAnswered = currentStage.every((q) => selections[q.id]);
 
   async function finishStage() {
@@ -93,6 +80,7 @@ export function Quiz({
 
   function continueToNextStage() {
     setStageResult(null);
+    setCurrentQuestionIndex(0);
     setCurrentStageIndex((i) => i + 1);
   }
 
@@ -101,6 +89,7 @@ export function Quiz({
   // picks and drop back to the question screen at the same stage index.
   function retryStage() {
     setStageResult(null);
+    setCurrentQuestionIndex(0);
     setSelections((prev) => {
       const next = { ...prev };
       for (const q of currentStage) delete next[q.id];
@@ -238,8 +227,6 @@ export function Quiz({
     );
   }
 
-  let questionNumber = 0;
-
   return (
     <main className="night-sky relative min-h-screen overflow-hidden pb-24">
       <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
@@ -257,72 +244,92 @@ export function Quiz({
           <span className="size-9" />
         </header>
 
-        <div className="mx-auto mt-6 flex max-w-sm items-center gap-2">
-          {stages.map((_, i) => (
-            <span
-              key={i}
-              className={`h-2.5 flex-1 rounded-full ${
-                i < currentStageIndex ? "bg-primary" : i === currentStageIndex ? "bg-primary/50" : "bg-secondary"
-              }`}
+        {/* Per-question progress within the current stage (e.g. "2 / 10") -
+            shown one question at a time so it's usable on a phone screen,
+            rather than a long scroll of every question in the stage. */}
+        <div className="mx-auto mt-6 max-w-sm">
+          <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
+            <span>
+              Question {currentQuestionIndex + 1} / {currentStage.length}
+            </span>
+            <span>{Math.round(((currentQuestionIndex + 1) / Math.max(currentStage.length, 1)) * 100)}%</span>
+          </div>
+          <div className="relative mt-1.5 h-2.5 overflow-hidden rounded-full bg-secondary">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${((currentQuestionIndex + 1) / Math.max(currentStage.length, 1)) * 100}%` }}
             />
-          ))}
+          </div>
         </div>
 
-        <div className="mt-8 space-y-6">
-          {groups.map((group) => (
-            <div key={group.documentId} className="space-y-6">
-              {group.passage && (
-                <div className="rounded-3xl border border-border/70 bg-secondary/50 p-6 backdrop-blur">
-                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                    Read this passage, then answer the questions below
-                  </p>
-                  <div className="text-[15px] leading-relaxed whitespace-pre-wrap">{group.passage}</div>
-                </div>
-              )}
+        {question && (
+          <div className="mt-8 space-y-6">
+            {question.passage && (
+              <div className="rounded-3xl border border-border/70 bg-secondary/50 p-6 backdrop-blur">
+                <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  Read this passage, then answer the question below
+                </p>
+                <div className="text-[15px] leading-relaxed whitespace-pre-wrap">{question.passage}</div>
+              </div>
+            )}
 
-              {group.questions.map((q) => {
-                questionNumber += 1;
-                return (
-                  <section
-                    key={q.id}
-                    className="animate-pop-in rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest sm:p-7"
+            <section
+              key={question.id}
+              className="animate-pop-in rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest sm:p-7"
+            >
+              <h2 className="text-lg leading-snug font-semibold sm:text-xl">{question.questionText}</h2>
+              <div className="mt-5 grid gap-3">
+                {question.options.map((opt, i) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setSelections((prev) => ({ ...prev, [question.id]: opt.id }))}
+                    className={`rounded-2xl border-2 px-5 py-3.5 text-left font-semibold transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
+                      selections[question.id] === opt.id
+                        ? "border-primary bg-primary/15 text-primary"
+                        : "border-border bg-secondary/60"
+                    }`}
                   >
-                    <h2 className="text-lg leading-snug font-semibold sm:text-xl">
-                      {questionNumber}. {q.questionText}
-                    </h2>
-                    <div className="mt-5 grid gap-3">
-                      {q.options.map((opt, i) => (
-                        <button
-                          key={opt.id}
-                          onClick={() => setSelections((prev) => ({ ...prev, [q.id]: opt.id }))}
-                          className={`rounded-2xl border-2 px-5 py-3.5 text-left font-semibold transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
-                            selections[q.id] === opt.id
-                              ? "border-primary bg-primary/15 text-primary"
-                              : "border-border bg-secondary/60"
-                          }`}
-                        >
-                          <span className="mr-3 text-muted-foreground">{LETTERS[i] ?? ""}</span>
-                          {opt.text}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+                    <span className="mr-3 text-muted-foreground">{LETTERS[i] ?? ""}</span>
+                    {opt.text}
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
 
         <div className="mt-8 flex flex-col items-center">
-          <Button
-            size="lg"
-            className="h-14 w-full max-w-sm rounded-2xl text-lg font-display"
-            onClick={finishStage}
-            disabled={!allAnswered || submitting}
-          >
-            {submitting ? "Submitting..." : currentStageIndex + 1 === stages.length ? "Finish quiz" : "Finish stage"}
-          </Button>
-          {!allAnswered && <p className="mt-3 text-sm text-muted-foreground">Answer every question to continue.</p>}
+          <div className="flex w-full max-w-sm items-center gap-3">
+            <Button
+              variant="secondary"
+              size="lg"
+              className="h-14 flex-1 rounded-2xl text-base font-display"
+              onClick={() => setCurrentQuestionIndex((i) => Math.max(0, i - 1))}
+              disabled={currentQuestionIndex === 0}
+            >
+              Previous
+            </Button>
+            {isLastQuestion ? (
+              <Button
+                size="lg"
+                className="h-14 flex-[1.4] rounded-2xl text-lg font-display"
+                onClick={finishStage}
+                disabled={!allAnswered || submitting}
+              >
+                {submitting ? "Submitting..." : currentStageIndex + 1 === stages.length ? "Finish quiz" : "Finish stage"}
+              </Button>
+            ) : (
+              <Button
+                size="lg"
+                className="h-14 flex-[1.4] rounded-2xl text-lg font-display"
+                onClick={() => setCurrentQuestionIndex((i) => Math.min(currentStage.length - 1, i + 1))}
+                disabled={!isAnswered}
+              >
+                Next
+              </Button>
+            )}
+          </div>
+          {!isAnswered && <p className="mt-3 text-sm text-muted-foreground">Choose an answer to continue.</p>}
           {error && <p className="mt-3 text-sm font-medium text-destructive">{error}</p>}
         </div>
       </div>

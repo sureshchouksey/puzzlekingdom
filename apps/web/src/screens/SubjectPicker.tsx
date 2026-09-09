@@ -256,7 +256,12 @@ export function SubjectPicker({
         )
       : null;
   const doneCount = questNodes?.filter((n) => n.state === "completed").length ?? 0;
-  const allDone = questNodes !== null && questNodes.length > 0 && doneCount === questNodes.length;
+  // The last topic in the journey is rendered as a distinct "final challenge"
+  // castle node (Lovable reference: a Castle-of-Counting-style centered,
+  // glowing node), separate from the alternating-line path of the topics
+  // before it.
+  const pathNodes = questNodes ? questNodes.slice(0, -1) : null;
+  const finalNode = questNodes && questNodes.length > 0 ? questNodes[questNodes.length - 1] : null;
 
   function inProgressFor(topic: string | undefined): InProgress | undefined {
     return inProgress?.find((r) => r.topic === (topic ?? null));
@@ -391,7 +396,7 @@ export function SubjectPicker({
                   <div className="pointer-events-none absolute top-0 bottom-0 left-1/2 w-1 -translate-x-1/2 rounded-full bg-gradient-to-b from-border via-border to-transparent" />
 
                   <ol className="relative space-y-8">
-                    {questNodes.map((node, i) => {
+                    {pathNodes!.map((node, i) => {
                       const side = i % 2 === 0 ? "sm:mr-auto sm:pr-10" : "sm:ml-auto sm:pl-10";
                       return (
                         <li
@@ -439,16 +444,64 @@ export function SubjectPicker({
                     })}
                   </ol>
 
-                  {allDone && (
-                    <div className="mt-12 flex flex-col items-center">
+                  {finalNode && (
+                    <div className="mt-12 flex flex-col items-center text-center">
                       <span
-                        className={`animate-float grid size-24 place-items-center rounded-full border-2 bg-card/80 ${JEWEL_TEXT[jewel]} ${JEWEL_GLOW[jewel]}`}
-                        style={{ borderColor: "currentColor" }}
+                        className={`grid size-24 place-items-center rounded-full border-2 bg-card/80 ${
+                          finalNode.state === "locked"
+                            ? "border-border text-muted-foreground opacity-55"
+                            : `animate-float ${JEWEL_TEXT[jewel]} ${JEWEL_GLOW[jewel]}`
+                        }`}
+                        style={finalNode.state !== "locked" ? { borderColor: "currentColor" } : undefined}
                       >
                         <Castle className="size-11" />
                       </span>
-                      <p className={`mt-3 text-xl font-display font-bold ${JEWEL_TEXT[jewel]}`}>Quest complete!</p>
-                      <p className="text-sm text-muted-foreground">Every {selectedSubject} topic mastered so far</p>
+                      <p
+                        className={`mt-4 text-xl font-display font-bold ${
+                          finalNode.state === "locked" ? "text-muted-foreground" : JEWEL_TEXT[jewel]
+                        }`}
+                      >
+                        {finalNode.topic}
+                      </p>
+
+                      {finalNode.state === "completed" && (
+                        <>
+                          <p className={`mt-1 flex items-center justify-center gap-1 text-sm ${JEWEL_TEXT[jewel]}`}>
+                            {Array.from({ length: 3 }).map((_, s) => (
+                              <Star
+                                key={s}
+                                className={`size-4 ${s < starsFor(finalNode.accuracy) ? "fill-current" : "opacity-30"}`}
+                              />
+                            ))}
+                          </p>
+                          <p className="mt-1 text-sm text-muted-foreground">Quest complete — every topic mastered!</p>
+                        </>
+                      )}
+
+                      {finalNode.state === "current" && (
+                        <>
+                          <p className="mt-1 text-sm text-muted-foreground">The final challenge of {selectedSubject}</p>
+                          <Button
+                            size="lg"
+                            className="mt-4 rounded-full font-display"
+                            onClick={() =>
+                              startQuest(
+                                questNodes!.length - 1,
+                                questNodes!.map(({ subjectName, topic }) => ({ subjectName, topic }))
+                              )
+                            }
+                            disabled={loading}
+                          >
+                            <Play className="size-4" /> {loading ? "Starting..." : "Play a stage"}
+                          </Button>
+                        </>
+                      )}
+
+                      {finalNode.state === "locked" && (
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Finish the quest before this one to unlock
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
