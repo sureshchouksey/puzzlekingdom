@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Bird, Send } from "lucide-react";
 import { getClassSubjects, getTutorConversation, sendTutorMessage, startTutorConversation } from "../api";
 import type { PkClass, Subject, TutorConversation, TutorMessage, TutorMessageMode, TutorQuestionContext } from "../types";
-import { Layout, styles } from "./Layout";
+import { Button } from "../components/ui/button";
 
 // The Study Buddy chat screen has two ways in - see
 // plan/AI-Study-Mentor-Agent-Plan.md, Section 10 steps 6/7.
@@ -27,6 +28,21 @@ type ChatBubble = {
   content: string;
   mode?: TutorMessageMode;
 };
+
+function BackHeader({ title, subtitle, onBack }: { title: string; subtitle?: string; onBack: () => void }) {
+  return (
+    <header className="flex items-center justify-between gap-4">
+      <Button variant="ghost" size="icon" className="rounded-full" onClick={onBack} aria-label="Back">
+        <ArrowLeft className="size-5" />
+      </Button>
+      <div className="text-center">
+        {subtitle && <p className="text-xs font-semibold tracking-[0.28em] text-primary/80 uppercase">{subtitle}</p>}
+        <h1 className="text-2xl sm:text-3xl">{title}</h1>
+      </div>
+      <span className="size-9" />
+    </header>
+  );
+}
 
 export function StudyBuddy({
   pkClass,
@@ -121,123 +137,116 @@ export function StudyBuddy({
 
   if (!subject) {
     return (
-      <Layout title="Ask your Study Buddy" onBack={onBack}>
-        <p style={{ color: "#5a5148", marginBottom: 24 }}>Which subject do you want to talk about?</p>
-        {subjects === null && !error && <p style={styles.muted}>Loading...</p>}
-        {subjects && subjects.length === 0 && <p style={styles.muted}>No subjects yet for this class.</p>}
-        {subjects && subjects.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 320 }}>
-            {subjects.map((s) => (
-              <button key={s.id} style={styles.secondaryButton} onClick={() => setSubject(s)}>
-                {s.name}
+      <main className="night-sky relative min-h-screen overflow-hidden">
+        <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+        <div className="relative mx-auto flex min-h-screen w-full max-w-2xl flex-col px-6 py-8">
+          <BackHeader title="Ask your Study Buddy" onBack={onBack} />
+          <section className="mx-auto mt-10 flex w-full max-w-sm flex-1 flex-col gap-3">
+            <p className="text-center text-muted-foreground">Which subject do you want to talk about?</p>
+            {subjects === null && !error && <p className="mt-4 text-center text-muted-foreground">Loading...</p>}
+            {subjects && subjects.length === 0 && (
+              <p className="mt-4 text-center text-muted-foreground">No subjects yet for this class.</p>
+            )}
+            {subjects?.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setSubject(s)}
+                className="flex items-center gap-4 rounded-2xl border border-border/70 bg-card/80 p-4 text-left backdrop-blur transition-transform hover:-translate-y-0.5 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <span className="grid size-11 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                  <Bird className="size-5" />
+                </span>
+                <span className="font-display font-semibold">{s.name}</span>
               </button>
             ))}
-          </div>
-        )}
-        {error && <p style={styles.error}>{error}</p>}
-      </Layout>
+            {error && <p className="text-center text-sm font-medium text-destructive">{error}</p>}
+          </section>
+        </div>
+      </main>
     );
   }
 
-  const title = questionContext ? `Explain this question — ${subject.name}` : `Study Buddy - ${subject.name}`;
+  const title = questionContext ? "Explain this question" : "Study Buddy";
 
   return (
-    <Layout title={title} onBack={onBack}>
-      {questionContext && (
-        <div style={{ ...styles.card, background: "#fbf8f1", border: "1px solid #d8cfb8" }}>
-          <p
-            style={{
-              ...styles.muted,
-              fontWeight: 600,
-              marginBottom: 8,
-              textTransform: "uppercase",
-              fontSize: 12,
-              letterSpacing: 0.5,
-            }}
-          >
-            Explaining
-          </p>
-          <p style={{ fontSize: 15, lineHeight: 1.5 }}>{questionContext.questionText}</p>
-        </div>
-      )}
+    <main className="night-sky relative flex min-h-screen flex-col overflow-hidden">
+      <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+      <div className="relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 py-8">
+        <BackHeader title={title} subtitle={subject.name} onBack={onBack} />
 
-      <div
-        style={{
-          border: "1px solid #e3ddd0",
-          borderRadius: 10,
-          padding: 16,
-          minHeight: 320,
-          maxHeight: 420,
-          overflowY: "auto",
-          marginBottom: 16,
-          background: "#fffdf8",
-        }}
-      >
-        {conversation === null && !error && <p style={styles.muted}>Getting your Study Buddy ready...</p>}
-        {messages.length === 0 && conversation && (
-          <p style={styles.muted}>
-            {questionContext
-              ? "Ask me anything about this question - I'm here to help!"
-              : `Ask me anything about ${subject.name} - I'm here to help!`}
-          </p>
-        )}
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            style={{
-              display: "flex",
-              justifyContent: m.role === "student" ? "flex-end" : "flex-start",
-              marginBottom: 10,
-            }}
-          >
-            <div
-              style={{
-                maxWidth: "80%",
-                padding: "10px 14px",
-                borderRadius: 12,
-                fontSize: 15,
-                lineHeight: 1.4,
-                background: m.role === "student" ? "#1a3c6e" : m.mode === "blocked" ? "#f6f1e6" : "#f0ece0",
-                color: m.role === "student" ? "#fff" : "#241d1a",
-              }}
-            >
-              {m.content}
-            </div>
+        {questionContext && (
+          <div className="mt-5 rounded-2xl border border-border/70 bg-secondary/50 p-4 backdrop-blur">
+            <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Explaining</p>
+            <p className="text-[15px] leading-relaxed">{questionContext.questionText}</p>
           </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
+        )}
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
+        <section className="mt-5 flex-1 space-y-4 overflow-y-auto pb-4">
+          {conversation === null && !error && (
+            <p className="my-auto text-center text-muted-foreground">Getting your Study Buddy ready...</p>
+          )}
+          {messages.length === 0 && conversation && (
+            <div className="flex items-end gap-2">
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                <Bird className="size-4" />
+              </span>
+              <p className="animate-pop-in max-w-[78%] rounded-3xl rounded-bl-lg border border-border/70 bg-card/85 px-5 py-3 text-base leading-relaxed backdrop-blur">
+                {questionContext
+                  ? "Ask me anything about this question - I'm here to help!"
+                  : `Ask me anything about ${subject.name} - I'm here to help!`}
+              </p>
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} className={`flex items-end gap-2 ${m.role === "student" ? "justify-end" : ""}`}>
+              {m.role === "agent" && (
+                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                  <Bird className="size-4" />
+                </span>
+              )}
+              <p
+                className={`animate-pop-in max-w-[78%] rounded-3xl px-5 py-3 text-base leading-relaxed whitespace-pre-wrap ${
+                  m.role === "student"
+                    ? "rounded-br-lg bg-primary text-primary-foreground"
+                    : m.mode === "blocked"
+                      ? "rounded-bl-lg bg-secondary/70 text-muted-foreground"
+                      : "rounded-bl-lg border border-border/70 bg-card/85 backdrop-blur"
+                }`}
+              >
+                {m.content}
+              </p>
+            </div>
+          ))}
+          <div ref={bottomRef} />
+        </section>
+
+        <form
+          className="sticky bottom-4 mb-2 flex items-center gap-2 rounded-full border border-border/70 bg-card/90 p-2 backdrop-blur shadow-quest"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSend();
           }}
-          placeholder="Type your question..."
-          disabled={!conversation || sending}
-          style={{
-            flex: 1,
-            padding: "10px 14px",
-            fontSize: 15,
-            borderRadius: 8,
-            border: "1px solid #c3c2b7",
-          }}
-        />
-        <button
-          style={styles.primaryButton}
-          onClick={handleSend}
-          disabled={!conversation || sending || !draft.trim()}
         >
-          {sending ? "..." : "Send"}
-        </button>
-      </div>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Type your question..."
+            disabled={!conversation || sending}
+            className="min-w-0 flex-1 bg-transparent px-4 py-2 text-base outline-none placeholder:text-muted-foreground"
+          />
+          <Button
+            type="submit"
+            size="icon"
+            className="size-11 shrink-0 rounded-full"
+            disabled={!conversation || sending || !draft.trim()}
+            aria-label="Send"
+          >
+            <Send className="size-5" />
+          </Button>
+        </form>
 
-      {error && <p style={styles.error}>{error}</p>}
-    </Layout>
+        {error && <p className="text-sm font-medium text-destructive">{error}</p>}
+      </div>
+    </main>
   );
 }
