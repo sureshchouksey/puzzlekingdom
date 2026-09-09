@@ -128,11 +128,18 @@ export function formatFunContentAnswer(item: FunContentItem): string {
  * instead of the full answer (see tutorIntent.ts's hint_request intent
  * and tutor.ts's own doc comment on why this is kept distinct from
  * formatFunContentAnswer above - a hint should nudge, not give it away).
- * Degrades gracefully when this particular item has no hintText yet
- * (migration 0015 added the column to an existing table, so older or
- * not-yet-updated rows can still be null) by falling back to offering the
- * full answer instead, rather than leaving the child with nothing. */
+ * Two different "nothing to give" cases, same distinction
+ * formatFunContentAnswer already draws: an item with no answerText at
+ * all (e.g. a tongue twister) genuinely has nothing to hint OR reveal -
+ * offering "tell you the answer instead" there would be a promise this
+ * app can't keep. An item that DOES have an answer but just hasn't been
+ * given a hintText yet (migration 0015 added the column to an existing
+ * table, so older/not-yet-updated rows can still be null) is the one
+ * case where falling back to offering the full answer makes sense. */
 export function formatFunContentHint(item: FunContentItem): string {
+  if (!item.answerText) {
+    return "That one doesn't have a hint or an answer - it was just for fun! Want another?";
+  }
   if (!item.hintText) {
     return "I don't have a hint saved for that one yet - want me to just tell you the answer instead?";
   }
