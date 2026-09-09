@@ -7,7 +7,7 @@ import { checkTutorBudget, recordTutorExchange, recordSimpleTutorExchange } from
 import { retrieveForQuery, retrieveForQuestion } from "../services/tutorRetrieval.js";
 import { generateTutorReply } from "../services/tutorGeneration.js";
 import { classifyTutorIntent } from "../services/tutorIntent.js";
-import { getRandomFunContent, formatFunContentReply } from "../services/funContent.js";
+import { getRandomFunContent, getFunContentById, formatFunContentReply, formatFunContentAnswer } from "../services/funContent.js";
 import { buildGreeting } from "../services/tutorProgress.js";
 
 // The AI Study Mentor's actual routes - see plan/AI-Study-Mentor-Agent-Plan.md,
@@ -204,6 +204,34 @@ export async function tutorRoutes(app: FastifyInstance) {
           const replyText = item
             ? formatFunContentReply(item)
             : "I don't have any of those saved up yet - ask a grown-up to add some to Puzzle Kingdom!";
+          await recordSimpleTutorExchange({
+            conversationId: conversation.id,
+            studentMessage: message,
+            replyText,
+            sourceType: item ? "fun_content" : "social",
+            sourceId: item?.id,
+          });
+          return reply.send({ mode: "template", reply: replyText });
+        }
+
+        if (intent.kind === "reveal_answer") {
+          // Find the most recent fun_content this conversation actually
+          // served - formatFunContentReply deliberately withholds the
+          // answer up front (see its own doc comment), so "what's the
+          // answer"/"I give up" needs to look back at whichever
+          // riddle/joke/puzzle/trivia question was sent last to know
+          // which answer to give. If nothing fun_content has been sent
+          // yet in this conversation, there's nothing to reveal.
+          const [lastFunMessage] = await db
+            .select({ sourceId: tutorMessages.matchedSourceId })
+            .from(tutorMessages)
+            .where(and(eq(tutorMessages.conversationId, conversation.id), eq(tutorMessages.matchedSourceType, "fun_content")))
+            .orderBy(desc(tutorMessages.createdAt))
+            .limit(1);
+          const item = lastFunMessage?.sourceId ? await getFunContentById(lastFunMessage.sourceId) : null;
+          const replyText = item
+            ? formatFunContentAnswer(item)
+            : "I haven't asked you a riddle, joke, or puzzle yet this chat - want one? Just ask!";
           await recordSimpleTutorExchange({
             conversationId: conversation.id,
             studentMessage: message,

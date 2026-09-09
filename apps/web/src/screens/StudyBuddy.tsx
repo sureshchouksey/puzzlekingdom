@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, BookOpenText, Bird, Dices, Laugh, Puzzle as PuzzleIcon, Send } from "lucide-react";
+import { ArrowLeft, BookOpenText, Bird, Dices, Laugh, Lightbulb, Puzzle as PuzzleIcon, Send } from "lucide-react";
 import { getClassSubjects, getTutorConversation, sendTutorMessage, startTutorConversation } from "../api";
 import type { PkClass, Subject, TutorConversation, TutorMessage, TutorMessageMode, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
@@ -237,6 +237,12 @@ export function StudyBuddy({
               { label: "Riddle", icon: PuzzleIcon, text: "Give me a riddle!" },
               { label: "Joke", icon: Laugh, text: "Tell me a joke!" },
               { label: "Tongue twister", icon: BookOpenText, text: "Give me a tongue twister!" },
+              // Riddles/jokes/puzzles/trivia deliberately withhold their
+              // answer until asked (see funContent.ts's
+              // formatFunContentReply) - this chip is the easy, discoverable
+              // way for a child to ask, rather than needing to type
+              // something like "what's the answer" themselves.
+              { label: "Reveal answer", icon: Lightbulb, text: "What's the answer?" },
             ].map(({ label, icon: Icon, text }) => (
               <button
                 key={label}

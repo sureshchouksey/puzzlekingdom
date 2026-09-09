@@ -35,13 +35,20 @@ export type TutorIntent =
   | { kind: "greeting" }
   | { kind: "thanks" }
   | { kind: "fun_request"; contentType: FunContentType; subject?: "science" | "english" | "maths" }
+  // The child is asking to be told the answer to whatever riddle/joke/
+  // puzzle/trivia question was most recently sent - see funContent.ts's
+  // formatFunContentReply, which deliberately withholds the answer from
+  // the initial reply so there's something to guess. tutor.ts looks up
+  // the most recent fun_content message in this conversation to know
+  // which one to reveal.
+  | { kind: "reveal_answer" }
   | { kind: "academic" };
 
 const FUN_CONTENT_TYPES = ["tongue_twister", "riddle", "joke", "puzzle", "trivia"] as const;
 const TRIVIA_SUBJECTS = ["science", "english", "maths"] as const;
 
 const intentResultSchema = z.object({
-  intent: z.enum(["greeting", "thanks", "fun_request", "academic_or_other"]),
+  intent: z.enum(["greeting", "thanks", "fun_request", "reveal_answer", "academic_or_other"]),
   funContentType: z.enum(FUN_CONTENT_TYPES).optional(),
   subject: z.enum(TRIVIA_SUBJECTS).optional(),
 });
@@ -51,11 +58,14 @@ const INTENT_JSON_SCHEMA = {
   properties: {
     intent: {
       type: "string",
-      enum: ["greeting", "thanks", "fun_request", "academic_or_other"],
+      enum: ["greeting", "thanks", "fun_request", "reveal_answer", "academic_or_other"],
       description:
         "greeting = hello/hi/hey and similar. thanks = thank you or appreciation. fun_request = the child " +
         "wants to play, or asked for a riddle, joke, tongue twister, puzzle/brain-teaser, or a trivia " +
-        "question. academic_or_other = an actual question about their schoolwork, or anything else.",
+        "question. reveal_answer = the child is responding to a riddle/joke/puzzle/trivia question they " +
+        "were just asked - giving up, asking for the answer, saying they don't know, or similar (NOT a " +
+        "guess at the answer itself, and not used unless a riddle/joke/puzzle/trivia question was just " +
+        "asked). academic_or_other = an actual question about their schoolwork, or anything else.",
     },
     funContentType: {
       type: "string",
@@ -82,7 +92,9 @@ function buildPrompt(message: string): string {
     "Classify it using the JSON schema you've been given. A short, casual message like 'hi Sparky' " +
       "or 'can we do something fun' should NOT be treated as an academic question just because it's " +
       "short - use fun_request whenever the child seems to want to play, be entertained, or asked for " +
-      "a riddle/joke/tongue twister/puzzle/trivia by name or description, even informally.",
+      "a riddle/joke/tongue twister/puzzle/trivia by name or description, even informally. Use " +
+      "reveal_answer for a short give-up/'what's the answer'/'I don't know' reply that only makes sense " +
+      "as a response to something just asked - not for a genuine new question.",
   ].join("\n");
 }
 
@@ -107,11 +119,13 @@ const TWISTER_PATTERN = /\btongue\s?twisters?\b|\btwisters?\b/i;
 const PUZZLE_PATTERN = /\bpuzzles?\b|\bbrain\s?teasers?\b/i;
 const TRIVIA_PATTERN = /\btrivia\b|\bquiz me\b/i;
 const PLAY_PATTERN = /\bplay\b|\bgame\b|\bsomething fun\b|\bbored\b|\bentertain me\b/i;
+const REVEAL_PATTERN = /\bgive up\b|\bi give up\b|\bdon'?t know\b|\bdunno\b|\bno idea\b|\bwhat'?s the answer\b|\btell me the answer\b|\bwhat is it\b|\breveal\b|\bi can'?t guess\b|\bidk\b/i;
 
 function heuristicClassifyTutorIntent(message: string): TutorIntent {
   const text = message.trim();
   if (GREETING_PATTERN.test(text)) return { kind: "greeting" };
   if (THANKS_PATTERN.test(text) && text.length < 60) return { kind: "thanks" };
+  if (REVEAL_PATTERN.test(text)) return { kind: "reveal_answer" };
 
   if (RIDDLE_PATTERN.test(text)) return { kind: "fun_request", contentType: "riddle" };
   if (JOKE_PATTERN.test(text)) return { kind: "fun_request", contentType: "joke" };
@@ -161,6 +175,7 @@ export async function classifyTutorIntent(message: string): Promise<TutorIntent>
 
       if (parsed.intent === "greeting") return { kind: "greeting" };
       if (parsed.intent === "thanks") return { kind: "thanks" };
+      if (parsed.intent === "reveal_answer") return { kind: "reveal_answer" };
       if (parsed.intent === "fun_request" && parsed.funContentType) {
         return {
           kind: "fun_request",

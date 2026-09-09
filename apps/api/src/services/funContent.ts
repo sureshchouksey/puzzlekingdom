@@ -62,19 +62,58 @@ export async function getRandomFunContent(params: {
   };
 }
 
-/** Formats one fun_content row as a chat-ready reply string. */
-export function formatFunContentReply(item: FunContentItem): string {
-  const labels: Record<FunContentType, { emoji: string; label: string }> = {
-    tongue_twister: { emoji: "👅", label: "Tongue twister" },
-    riddle: { emoji: "🧠", label: "Riddle" },
-    joke: { emoji: "😄", label: "Joke" },
-    puzzle: { emoji: "🧩", label: "Puzzle" },
-    trivia: { emoji: "🔎", label: "Quick question" },
+/** Looks up one fun_content row by id - used to reveal the answer to
+ * whichever riddle/joke/puzzle/trivia question was most recently sent in
+ * a conversation (see tutor.ts's "reveal_answer" handling), once the
+ * child asks for it rather than having it shown right away. Returns null
+ * if the id doesn't exist (should be rare - it only ever comes from a
+ * matched_source_id this same module wrote), same graceful-degrade
+ * contract as getRandomFunContent above. */
+export async function getFunContentById(id: string): Promise<FunContentItem | null> {
+  const [row] = await db.select().from(funContent).where(eq(funContent.id, id)).limit(1);
+  if (!row) return null;
+  return {
+    id: row.id,
+    contentType: row.contentType as FunContentType,
+    subject: row.subject,
+    promptText: row.promptText,
+    answerText: row.answerText,
   };
-  const { emoji, label } = labels[item.contentType];
-  let reply = `${emoji} ${label} time! ${item.promptText}`;
-  if (item.answerText) {
-    reply += `\n\n(When you're ready... ${item.answerText})`;
+}
+
+const CONTENT_LABELS: Record<FunContentType, { emoji: string; label: string }> = {
+  tongue_twister: { emoji: "👅", label: "Tongue twister" },
+  riddle: { emoji: "🧠", label: "Riddle" },
+  joke: { emoji: "😄", label: "Joke" },
+  puzzle: { emoji: "🧩", label: "Puzzle" },
+  trivia: { emoji: "🔎", label: "Quick question" },
+};
+
+/**
+ * Formats one fun_content row as a chat-ready reply string - the
+ * question/prompt only, deliberately WITHOUT the answer. Showing a
+ * riddle/joke/puzzle/trivia question and its answer in the very same
+ * message defeats the point of asking - a child should get a real chance
+ * to guess first. The answer is only ever sent later, in response to a
+ * "reveal_answer" intent (see tutorIntent.ts/formatFunContentAnswer
+ * below), which looks up this same row by the matched_source_id this
+ * reply gets recorded under.
+ */
+export function formatFunContentReply(item: FunContentItem): string {
+  const { emoji, label } = CONTENT_LABELS[item.contentType];
+  if (!item.answerText) {
+    // Tongue twisters have no answer to guess - nothing to hold back.
+    return `${emoji} ${label} time! ${item.promptText}`;
   }
-  return reply;
+  return `${emoji} ${label} time! ${item.promptText}\n\nTake a guess - or just ask me for the answer if you get stuck!`;
+}
+
+/** Formats the answer reveal for one fun_content row, once the child asks
+ * for it - see formatFunContentReply's doc comment above for why the two
+ * are kept separate. */
+export function formatFunContentAnswer(item: FunContentItem): string {
+  if (!item.answerText) {
+    return "That one doesn't have an answer to reveal - it was just for fun! Want another?";
+  }
+  return `The answer is... ${item.answerText}`;
 }
