@@ -6,6 +6,23 @@ import { relations } from "drizzle-orm";
 
 export const documentStatus = pgEnum("document_status", ["uploaded", "processing", "ready", "failed"]);
 
+// Alongside the original MCQ, per
+// plan/Question-Types-and-Content-Authoring-Plan.md ("Data model
+// recommendation"). MCQ and true_false both keep using the existing
+// options/correctOptionId columns (true_false is just an MCQ with two
+// options, rendered as a toggle) - answerPayload is only used by the
+// genuinely new shapes below.
+export const questionType = pgEnum("question_type", [
+  "mcq",
+  "true_false",
+  "fill_blank",
+  "missing_number",
+  "missing_spelling",
+  "match_column",
+  "short_answer",
+  "long_answer",
+]);
+
 // The audience a piece of content targets - e.g. "11+ Grammar Prep" for
 // CSSE/CCHS exam content, or "Year 3" for National Curriculum course
 // content. Nested above subject: the same subject (Maths, English) exists
@@ -91,6 +108,20 @@ export const questions = pgTable("questions", {
   // G BIV..."), distinct from `explanation` (which states the factual
   // answer). Surfaced especially on a wrong answer, in the results review.
   tip: text("tip"),
+  // Defaults to "mcq" for every pre-existing row (see migration 0011) -
+  // mcq/true_false answers stay in options/correctOptionId above;
+  // answerPayload below is only populated for the newer types.
+  questionType: questionType("question_type").notNull().default("mcq"),
+  // Flexible per-type answer shape - see the data model table in
+  // plan/Question-Types-and-Content-Authoring-Plan.md for what each
+  // questionType actually stores here (e.g. { acceptedAnswers: string[] }
+  // for fill_blank, { left, right, correctPairs } for match_column).
+  // Null for mcq/true_false, which don't need it.
+  answerPayload: jsonb("answer_payload").$type<Record<string, unknown>>(),
+  // Nullable - only Non-Verbal Reasoning content (Phase 2) needs this so
+  // far, but added now (migration 0011) so that phase doesn't need its
+  // own schema migration just for this one column.
+  imageUrl: text("image_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
