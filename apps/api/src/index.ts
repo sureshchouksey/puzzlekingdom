@@ -12,6 +12,7 @@ import { leaderboardRoutes } from "./routes/leaderboard.js";
 import { registerAuth } from "./auth.js";
 import { adminRoutes } from "./routes/admin.js";
 import { tutorRoutes } from "./routes/tutor.js";
+import { closeDb } from "./db/client.js";
 
 const app = Fastify({ logger: true });
 
@@ -58,3 +59,16 @@ app.listen({ port: env.PORT, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);
   process.exit(1);
 });
+
+// Close the Fastify server and the Postgres connection on a normal
+// shutdown signal, so the process actually exits instead of hanging
+// until tsx watch (or the OS) force-kills it - see closeDb()'s own doc
+// comment in db/client.ts for why the DB connection needs this at all.
+async function shutdown(signal: string) {
+  app.log.info(`Received ${signal}, shutting down...`);
+  await app.close().catch((err) => app.log.error(err, "Error while closing the Fastify server"));
+  await closeDb().catch((err) => app.log.error(err, "Error while closing the database connection"));
+  process.exit(0);
+}
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
