@@ -1,33 +1,29 @@
 import { useState } from "react";
-import { Crown, Delete, Rocket, Shield, ShieldHalf, Swords, Users, Wand2 } from "lucide-react";
+import { Delete, ShieldHalf, Users } from "lucide-react";
 import { lookupProfile, setProfilePin, verifyProfilePin } from "../api";
 import type { Profile, ProfileLookupResponse } from "../types";
 import { Button } from "../components/ui/button";
 
 type Title = "Prince" | "Princess";
 
-const JEWELS = ["gold", "sapphire", "ruby", "emerald", "amethyst"] as const;
-type Jewel = (typeof JEWELS)[number];
-const JEWEL_TEXT: Record<Jewel, string> = {
-  gold: "text-primary",
-  sapphire: "text-sapphire",
-  ruby: "text-ruby",
-  emerald: "text-emerald",
-  amethyst: "text-amethyst",
-};
+type AvatarOption = { id: string; title: Title; file: string };
 
-type AvatarOption = { id: string; title: Title; icon: typeof Crown; jewel: Jewel };
-
-// 5 avatars per title (10 total) - the same icon/color set under each
-// heading, so choosing is about which one looks fun rather than a
-// gendered symbol. `id` (e.g. "prince-3") is what actually gets saved;
-// see profiles.avatarId on the backend.
-const AVATAR_ICONS = [Crown, Shield, Swords, Rocket, Wand2] as const;
-function buildAvatars(title: Title): AvatarOption[] {
-  return AVATAR_ICONS.map((icon, i) => ({ id: `${title.toLowerCase()}-${i + 1}`, title, icon, jewel: JEWELS[i] }));
+// 5 avatars per title (10 total), drawn from the Multiavatar character
+// portraits added to public/ - see plan/Puzzle-Kingdom-Master-Roadmap.md
+// for how the boy/girl split was picked (visual review of all 12; the
+// set skewed adult/male, so a couple of the least "corporate-looking"
+// options were used to round Prince out to 5). `id` is the Multiavatar
+// seed (e.g. "amit") - that's what actually gets saved as
+// profiles.avatarId, and it's combined with the `/Multiavatar-<seed>.png`
+// filename convention wherever an avatar is rendered (here and in
+// Leaderboard.tsx).
+const PRINCE_AVATAR_IDS = ["amit", "r", "rabi", "sun", "pri"];
+const PRINCESS_AVATAR_IDS = ["Aranya", "priyank", "suj", "jo", "su"];
+function buildAvatars(title: Title, ids: string[]): AvatarOption[] {
+  return ids.map((id) => ({ id, title, file: `/Multiavatar-${id}.png` }));
 }
-const PRINCE_AVATARS = buildAvatars("Prince");
-const PRINCESS_AVATARS = buildAvatars("Princess");
+const PRINCE_AVATARS = buildAvatars("Prince", PRINCE_AVATAR_IDS);
+const PRINCESS_AVATARS = buildAvatars("Princess", PRINCESS_AVATAR_IDS);
 
 // Which step of "entering the kingdom" is showing. `looked` holds what
 // POST /profiles just told us about the typed name, so the right next
@@ -267,14 +263,14 @@ export function Welcome({
                           key={a.id}
                           type="button"
                           onClick={() => setStep({ kind: "setPin", looked: step.looked, title: a.title, avatarId: a.id })}
-                          aria-label={`${a.title} avatar ${a.id.split("-")[1]}`}
+                          aria-label={`${a.title} avatar ${a.id}`}
                           className="group flex items-center justify-center rounded-2xl p-1 transition-transform hover:-translate-y-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                         >
-                          <span
-                            className={`grid size-12 place-items-center rounded-full border-2 border-border bg-secondary shadow-inner transition-colors group-hover:border-primary/60 sm:size-14 ${JEWEL_TEXT[a.jewel]}`}
-                          >
-                            <a.icon className="size-6" />
-                          </span>
+                          <img
+                            src={a.file}
+                            alt=""
+                            className="size-12 rounded-full border-2 border-border bg-secondary object-cover shadow-inner transition-colors group-hover:border-primary/60 sm:size-14"
+                          />
                         </button>
                       ))}
                     </div>
