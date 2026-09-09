@@ -30,7 +30,7 @@ export const PRINCE_AVATARS: AvatarChoice[] = [
   { id: "prince-halo", title: "Prince", file: "/royal-prince-halo.jpeg" },
   { id: "prince-castle", title: "Prince", file: "/royal-prince-castle.jpeg" },
   { id: "prince-classic", title: "Prince", file: "/royal-prince-classic.jpeg" },
-  { id: "prince-modern", title: "Prince", file: "/royal-prince-modern.webp" },
+  { id: "prince-modern", title: "Prince", file: "/royal-prince-modern.jpeg" },
 ];
 
 export const PRINCESS_AVATARS: AvatarChoice[] = [
@@ -38,7 +38,7 @@ export const PRINCESS_AVATARS: AvatarChoice[] = [
   { id: "princess-priyank", title: "Princess", file: "/Multiavatar-priyank.png" },
   { id: "princess-bow", title: "Princess", file: "/royal-princess-bow.jpeg" },
   { id: "princess-aurora", title: "Princess", file: "/royal-princess-aurora.jpeg" },
-  { id: "princess-blossom", title: "Princess", file: "/royal-princess-blossom.jpeg" },
+  { id: "princess-blossom", title: "Princess", file: "/royal-princess-blossom.webp" },
 ];
 
 const BY_ID = new Map<string, AvatarChoice>(
