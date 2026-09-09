@@ -23,6 +23,8 @@ export const questionType = pgEnum("question_type", [
   "long_answer",
 ]);
 
+export const topicDifficulty = pgEnum("topic_difficulty", ["beginner", "medium", "hard"]);
+
 // The audience a piece of content targets - e.g. "11+ Grammar Prep" for
 // CSSE/CCHS exam content, or "Year 3" for National Curriculum course
 // content. Nested above subject: the same subject (Maths, English) exists
@@ -35,6 +37,23 @@ export const classes = pgTable("classes", {
 export const subjects = pgTable("subjects", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull().unique(),
+});
+
+// A real, ordered topic within one class+subject - replaces inventing
+// topic structure out of questions.topics' free-text tag array (that
+// column stays as-is for now; nothing here backfills or reads from it
+// yet). displayOrder drives the quest map's node sequence
+// (Lovable-Design-Migration-Plan.md Phase 2); difficulty drives the
+// Beginner/Medium/Hard reward-system labels
+// (Question-Types-and-Content-Authoring-Plan.md).
+export const topics = pgTable("topics", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  classId: uuid("class_id").notNull().references(() => classes.id),
+  subjectId: uuid("subject_id").notNull().references(() => subjects.id),
+  name: text("name").notNull(),
+  displayOrder: integer("display_order").notNull().default(0),
+  difficulty: topicDifficulty("difficulty").notNull().default("beginner"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // A lightweight named player, not a real account - no password, no login.
@@ -190,6 +209,7 @@ export const conceptGuides = pgTable("concept_guides", {
 export const classesRelations = relations(classes, ({ many }) => ({
   documents: many(documents),
   conceptGuides: many(conceptGuides),
+  topics: many(topics),
 }));
 
 export const subjectsRelations = relations(subjects, ({ many }) => ({
@@ -197,6 +217,7 @@ export const subjectsRelations = relations(subjects, ({ many }) => ({
   questions: many(questions),
   attempts: many(quizAttempts),
   conceptGuides: many(conceptGuides),
+  topics: many(topics),
 }));
 
 export const profilesRelations = relations(profiles, ({ many }) => ({
@@ -232,6 +253,11 @@ export const quizAttemptAnswersRelations = relations(quizAttemptAnswers, ({ one 
 export const conceptGuidesRelations = relations(conceptGuides, ({ one }) => ({
   class: one(classes, { fields: [conceptGuides.classId], references: [classes.id] }),
   subject: one(subjects, { fields: [conceptGuides.subjectId], references: [subjects.id] }),
+}));
+
+export const topicsRelations = relations(topics, ({ one }) => ({
+  class: one(classes, { fields: [topics.classId], references: [classes.id] }),
+  subject: one(subjects, { fields: [topics.subjectId], references: [subjects.id] }),
 }));
 
 // Section 10 step 5 (plan/AI-Study-Mentor-Agent-Plan.md) - the tutor's
