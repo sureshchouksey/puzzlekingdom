@@ -45,9 +45,48 @@ const THANKS_REPLIES = [
   "Anytime! I'm really proud of how hard you're trying.",
   "No problem at all - that's what I'm here for!",
 ];
+const CORRECT_GUESS_REPLIES = [
+  "That's it - you got it! Nicely done!",
+  "Yes! You figured it out!",
+  "Correct! You're a riddle master!",
+];
+const INCORRECT_GUESS_REPLIES = [
+  "Not quite! Want a hint, or should I tell you the answer?",
+  "Good try, but that's not it! Try again, or ask me to reveal the answer.",
+  "Close, but not quite - want to guess again, or see the answer?",
+];
 
 function pickRandom<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
+}
+
+// Was a riddle/joke/puzzle/trivia question the very last thing said in
+// this conversation? If so, the child's next message is very likely an
+// attempt to answer it (see tutorIntent.ts's answer_attempt intent and
+// the context-aware classification it does), not a fresh request or
+// lesson question. Deliberately strict about "the very last message" -
+// once anything else has happened since (a reveal, feedback on a guess, a
+// new fun-content item, an academic reply), the window closes and the
+// next message is classified fresh instead of being forced against a
+// stale question. Returns null (nothing pending) when the item has no
+// answerText at all (e.g. a tongue twister) - there's nothing to guess.
+async function getPendingFunContent(conversationId: string) {
+  const [lastMessage] = await db
+    .select({
+      role: tutorMessages.role,
+      sourceType: tutorMessages.matchedSourceType,
+      sourceId: tutorMessages.matchedSourceId,
+    })
+    .from(tutorMessages)
+    .where(eq(tutorMessages.conversationId, conversationId))
+    .orderBy(desc(tutorMessages.createdAt))
+    .limit(1);
+  if (!lastMessage || lastMessage.role !== "agent" || lastMessage.sourceType !== "fun_content" || !lastMessage.sourceId) {
+    return null;
+  }
+  const item = await getFunContentById(lastMessage.sourceId);
+  if (!item || !item.answerText) return null;
+  return item;
 }
 
 export async function tutorRoutes(app: FastifyInstance) {
@@ -186,7 +225,11 @@ export async function tutorRoutes(app: FastifyInstance) {
       // resolve and skipping this call keeps that flow both faster and
       // immune to a misclassification derailing it. See tutorIntent.ts.
       if (conversation.contextType === "general") {
-        const intent = await classifyTutorIntent(message);
+        const pendingItem = await getPendingFunContent(conversation.id);
+        const intent = await classifyTutorIntent(
+          message,
+          pendingItem ? { promptText: pendingItem.promptText, answerText: pendingItem.answerText! } : undefined
+        );
 
         if (intent.kind === "greeting" || intent.kind === "thanks") {
           const replyText = pickRandom(intent.kind === "greeting" ? GREETING_REPLIES : THANKS_REPLIES);
@@ -236,8 +279,29 @@ export async function tutorRoutes(app: FastifyInstance) {
             conversationId: conversation.id,
             studentMessage: message,
             replyText,
-            sourceType: item ? "fun_content" : "social",
-            sourceId: item?.id,
+            // Always 'social', never 'fun_content' - revealing an answer
+            // closes the pending-question window (getPendingFunContent
+            // above only looks at the very last message), so the child's
+            // next message is classified fresh rather than re-checked as
+            // another guess at a question they've already been told.
+            sourceType: "social",
+          });
+          return reply.send({ mode: "template", reply: replyText });
+        }
+
+        if (intent.kind === "answer_attempt") {
+          // pendingItem is guaranteed set here - classifyTutorIntent only
+          // ever returns answer_attempt when it was given pending context
+          // to judge against in the first place (see tutorIntent.ts).
+          const replyText = pickRandom(intent.correct ? CORRECT_GUESS_REPLIES : INCORRECT_GUESS_REPLIES);
+          await recordSimpleTutorExchange({
+            conversationId: conversation.id,
+            studentMessage: message,
+            replyText,
+            // 'social', same reasoning as reveal_answer above - feedback
+            // on a guess closes this question's pending window too,
+            // whether they got it right or are about to guess again.
+            sourceType: "social",
           });
           return reply.send({ mode: "template", reply: replyText });
         }

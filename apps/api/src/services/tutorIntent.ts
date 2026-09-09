@@ -42,15 +42,23 @@ export type TutorIntent =
   // the most recent fun_content message in this conversation to know
   // which one to reveal.
   | { kind: "reveal_answer" }
+  // The child appears to be answering the riddle/joke/puzzle/trivia
+  // question that's still outstanding (see tutor.ts's getPendingFunContent)
+  // - `correct` says whether their guess matches the pending answer,
+  // judged with some tolerance for rewording/spelling. Only ever
+  // classified when a pending question was actually passed to
+  // classifyTutorIntent below - never invented when nothing is pending.
+  | { kind: "answer_attempt"; correct: boolean }
   | { kind: "academic" };
 
 const FUN_CONTENT_TYPES = ["tongue_twister", "riddle", "joke", "puzzle", "trivia"] as const;
 const TRIVIA_SUBJECTS = ["science", "english", "maths"] as const;
 
 const intentResultSchema = z.object({
-  intent: z.enum(["greeting", "thanks", "fun_request", "reveal_answer", "academic_or_other"]),
+  intent: z.enum(["greeting", "thanks", "fun_request", "reveal_answer", "answer_attempt", "academic_or_other"]),
   funContentType: z.enum(FUN_CONTENT_TYPES).optional(),
   subject: z.enum(TRIVIA_SUBJECTS).optional(),
+  correct: z.boolean().optional(),
 });
 
 const INTENT_JSON_SCHEMA = {
@@ -58,14 +66,16 @@ const INTENT_JSON_SCHEMA = {
   properties: {
     intent: {
       type: "string",
-      enum: ["greeting", "thanks", "fun_request", "reveal_answer", "academic_or_other"],
+      enum: ["greeting", "thanks", "fun_request", "reveal_answer", "answer_attempt", "academic_or_other"],
       description:
         "greeting = hello/hi/hey and similar. thanks = thank you or appreciation. fun_request = the child " +
         "wants to play, or asked for a riddle, joke, tongue twister, puzzle/brain-teaser, or a trivia " +
-        "question. reveal_answer = the child is responding to a riddle/joke/puzzle/trivia question they " +
-        "were just asked - giving up, asking for the answer, saying they don't know, or similar (NOT a " +
-        "guess at the answer itself, and not used unless a riddle/joke/puzzle/trivia question was just " +
-        "asked). academic_or_other = an actual question about their schoolwork, or anything else.",
+        "question. reveal_answer = the child is asking to be told the answer to a riddle/joke/puzzle/" +
+        "trivia question they were just asked - giving up, asking outright for the answer, saying they " +
+        "don't know (NOT a guess at the answer itself). answer_attempt = the child appears to be guessing " +
+        "the answer to a riddle/joke/puzzle/trivia question they were just asked - use this ONLY when the " +
+        "prompt below tells you a question is currently outstanding. academic_or_other = an actual " +
+        "question about their schoolwork, or anything else.",
     },
     funContentType: {
       type: "string",
@@ -79,23 +89,54 @@ const INTENT_JSON_SCHEMA = {
         "Only set when intent is fun_request and funContentType is trivia - which subject, guessing " +
         "'science' if genuinely unclear.",
     },
+    correct: {
+      type: "boolean",
+      description:
+        "Only set when intent is answer_attempt - true if their guess matches the pending answer (be " +
+        "generous about close wording, spelling, or a partial match of the key idea), false otherwise.",
+    },
   },
   required: ["intent"],
 } as const;
 
-function buildPrompt(message: string): string {
-  return [
+export interface PendingFunContent {
+  promptText: string;
+  answerText: string;
+}
+
+// Context matters here, not just the words in isolation - "a coin" means
+// nothing on its own, but is obviously an answer attempt right after
+// being asked "what has a head and a tail but no body?". This is exactly
+// why intent classification is a real model call rather than keyword
+// matching (per this module's own doc comment above): telling apart a
+// guess from a new question needs the previous turn, not just this one.
+function buildPrompt(message: string, pending?: PendingFunContent): string {
+  const lines = [
     "You are a fast intent classifier for a children's educational chat app (Puzzle Kingdom). " +
       "A child (roughly age 7-11) in an ongoing chat with their AI Study Buddy just sent this message:",
     `"${message}"`,
     "",
+  ];
+  if (pending) {
+    lines.push(
+      `Context: they were just asked this riddle/joke/puzzle/trivia question: "${pending.promptText}" ` +
+        `(the correct answer is: "${pending.answerText}"). If their message reads as an attempt to answer ` +
+        "it - right or wrong, even informally worded, even just a single word or short phrase - classify " +
+        "it as answer_attempt and judge correctness generously (close wording, spelling, or the key idea " +
+        "is enough). Only use answer_attempt for an actual guess at THIS answer - not for a request to " +
+        "reveal it, a request to play something else, or a genuine, unrelated question.",
+      ""
+    );
+  }
+  lines.push(
     "Classify it using the JSON schema you've been given. A short, casual message like 'hi Sparky' " +
       "or 'can we do something fun' should NOT be treated as an academic question just because it's " +
       "short - use fun_request whenever the child seems to want to play, be entertained, or asked for " +
       "a riddle/joke/tongue twister/puzzle/trivia by name or description, even informally. Use " +
       "reveal_answer for a short give-up/'what's the answer'/'I don't know' reply that only makes sense " +
-      "as a response to something just asked - not for a genuine new question.",
-  ].join("\n");
+      "as a response to something just asked - not for a genuine new question."
+  );
+  return lines.join("\n");
 }
 
 // Keyword fallback for when the Gemini call itself fails (bad/expired
@@ -121,7 +162,27 @@ const TRIVIA_PATTERN = /\btrivia\b|\bquiz me\b/i;
 const PLAY_PATTERN = /\bplay\b|\bgame\b|\bsomething fun\b|\bbored\b|\bentertain me\b/i;
 const REVEAL_PATTERN = /\bgive up\b|\bi give up\b|\bdon'?t know\b|\bdunno\b|\bno idea\b|\bwhat'?s the answer\b|\btell me the answer\b|\bwhat is it\b|\breveal\b|\bi can'?t guess\b|\bidk\b/i;
 
-function heuristicClassifyTutorIntent(message: string): TutorIntent {
+// Strips filler words/punctuation so "It's a coin!" and "a coin" and
+// "COIN." all reduce to the same core text for a loose match against the
+// stored answer - used only by the heuristic fallback below (the real
+// classifier does this kind of generous, meaning-aware comparison itself).
+function normalizeForFuzzyMatch(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/^(a|an|the|it'?s|it is|is it|maybe|i think( it'?s)?|my guess is)\s+/i, "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksLikeCorrectGuess(guess: string, answer: string): boolean {
+  const normGuess = normalizeForFuzzyMatch(guess);
+  const normAnswer = normalizeForFuzzyMatch(answer);
+  if (normGuess.length < 2 || normAnswer.length < 2) return false;
+  return normGuess === normAnswer || normAnswer.includes(normGuess) || normGuess.includes(normAnswer);
+}
+
+export function heuristicClassifyTutorIntent(message: string, pending?: PendingFunContent): TutorIntent {
   const text = message.trim();
   if (GREETING_PATTERN.test(text)) return { kind: "greeting" };
   if (THANKS_PATTERN.test(text) && text.length < 60) return { kind: "thanks" };
@@ -143,6 +204,14 @@ function heuristicClassifyTutorIntent(message: string): TutorIntent {
     return { kind: "fun_request", contentType: types[Math.floor(Math.random() * types.length)] };
   }
 
+  // Nothing else matched, but a riddle/joke/puzzle/trivia question is
+  // still outstanding and this message is short enough to plausibly be a
+  // one-line guess at it (rather than a real, longer lesson question) -
+  // treat it as an answer attempt instead of falling through to academic.
+  if (pending && text.length > 0 && text.length < 100) {
+    return { kind: "answer_attempt", correct: looksLikeCorrectGuess(text, pending.answerText) };
+  }
+
   return { kind: "academic" };
 }
 
@@ -158,12 +227,12 @@ function heuristicClassifyTutorIntent(message: string): TutorIntent {
  * which was already established as the safe default (see this module's
  * own doc comment above).
  */
-export async function classifyTutorIntent(message: string): Promise<TutorIntent> {
+export async function classifyTutorIntent(message: string, pending?: PendingFunContent): Promise<TutorIntent> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const response = await getGeminiClient().models.generateContent({
         model: env.GEMINI_TUTOR_MODEL,
-        contents: [{ text: buildPrompt(message) }],
+        contents: [{ text: buildPrompt(message, pending) }],
         config: {
           responseMimeType: "application/json",
           responseJsonSchema: INTENT_JSON_SCHEMA,
@@ -176,6 +245,7 @@ export async function classifyTutorIntent(message: string): Promise<TutorIntent>
       if (parsed.intent === "greeting") return { kind: "greeting" };
       if (parsed.intent === "thanks") return { kind: "thanks" };
       if (parsed.intent === "reveal_answer") return { kind: "reveal_answer" };
+      if (parsed.intent === "answer_attempt") return { kind: "answer_attempt", correct: parsed.correct ?? false };
       if (parsed.intent === "fun_request" && parsed.funContentType) {
         return {
           kind: "fun_request",
@@ -187,8 +257,8 @@ export async function classifyTutorIntent(message: string): Promise<TutorIntent>
     } catch (err) {
       if (attempt === 0 && isRetryableStatus(err)) continue;
       console.warn("Tutor intent classification failed - falling back to keyword matching:", err);
-      return heuristicClassifyTutorIntent(message);
+      return heuristicClassifyTutorIntent(message, pending);
     }
   }
-  return heuristicClassifyTutorIntent(message);
+  return heuristicClassifyTutorIntent(message, pending);
 }
