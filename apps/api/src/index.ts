@@ -14,7 +14,12 @@ import { adminRoutes } from "./routes/admin.js";
 import { tutorRoutes } from "./routes/tutor.js";
 import { closeDb } from "./db/client.js";
 
-const app = Fastify({ logger: true });
+// forceCloseConnections: without this, app.close() waits for any open
+// keep-alive HTTP connections (e.g. a browser tab left open on the app)
+// to close naturally before it resolves - which can be indefinitely, and
+// was exactly why the SIGINT/SIGTERM handler below could itself hang
+// rather than fixing the tsx watch restart loop it was added for.
+const app = Fastify({ logger: true, forceCloseConnections: true });
 
 await app.register(cors, { origin: true });
 await app.register(multipart);
