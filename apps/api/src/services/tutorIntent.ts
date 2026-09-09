@@ -158,7 +158,14 @@ const RIDDLE_PATTERN = /\briddles?\b/i;
 const JOKE_PATTERN = /\bjokes?\b|\bfunny\b/i;
 const TWISTER_PATTERN = /\btongue\s?twisters?\b|\btwisters?\b/i;
 const PUZZLE_PATTERN = /\bpuzzles?\b|\bbrain\s?teasers?\b/i;
-const TRIVIA_PATTERN = /\btrivia\b|\bquiz me\b/i;
+// "trivia"/"quiz me"/"test me" as bare triggers, or an explicit request
+// verb ("ask me"/"give me") plus a subject - deliberately NOT a bare
+// "<subject> question" match (e.g. just "science question" anywhere in
+// the text), since that would also catch a real academic ask like "I
+// have a science question, how does photosynthesis work" - requiring
+// "ask me"/"give me" keeps this to messages that are clearly requesting
+// content, not stating they already have a question.
+const TRIVIA_PATTERN = /\btrivia\b|\bquiz me\b|\btest me\b|\b(ask|give)\s+me\s+(a|an)?\s*(science|english|maths?)\b/i;
 const PLAY_PATTERN = /\bplay\b|\bgame\b|\bsomething fun\b|\bbored\b|\bentertain me\b/i;
 const REVEAL_PATTERN = /\bgive up\b|\bi give up\b|\bdon'?t know\b|\bdunno\b|\bno idea\b|\bwhat'?s the answer\b|\btell me the answer\b|\bwhat is it\b|\breveal\b|\bi can'?t guess\b|\bidk\b/i;
 
