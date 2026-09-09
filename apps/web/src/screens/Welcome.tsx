@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Delete, ShieldHalf, Sparkles } from "lucide-react";
+import { Delete, ShieldHalf, Users } from "lucide-react";
 import { lookupProfile, setProfilePin, verifyProfilePin } from "../api";
 import type { Profile, ProfileLookupResponse } from "../types";
 import { Button } from "../components/ui/button";
@@ -76,7 +76,15 @@ function PinKeypad({ onDigit, onBackspace, onBack }: { onDigit: (d: string) => v
 // older profile from before PINs existed) or enter your existing one -
 // this is what makes a profile a real per-child login, not just a typed
 // name.
-export function Welcome({ onEnter, onAdminLogin }: { onEnter: (profile: Profile) => void; onAdminLogin: () => void }) {
+export function Welcome({
+  onEnter,
+  onAdminLogin,
+  onParentDashboard,
+}: {
+  onEnter: (profile: Profile) => void;
+  onAdminLogin: () => void;
+  onParentDashboard: () => void;
+}) {
   const [step, setStep] = useState<Step>({ kind: "name" });
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
@@ -331,10 +339,14 @@ export function Welcome({ onEnter, onAdminLogin }: { onEnter: (profile: Profile)
           {error && <p className="mt-4 text-sm font-medium text-destructive">{error}</p>}
         </section>
 
-        <footer className="mt-auto flex flex-wrap items-center justify-center gap-2 pt-12 text-center">
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground/60">
-            <Sparkles className="size-3.5" />
-          </span>
+        <footer className="mt-auto flex flex-wrap items-center justify-center gap-6 pt-12 text-center">
+          <button
+            onClick={onParentDashboard}
+            className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground/70 transition-colors hover:text-primary"
+          >
+            <Users className="size-3.5" />
+            Parent dashboard
+          </button>
           <button
             onClick={onAdminLogin}
             className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground/70 transition-colors hover:text-primary"

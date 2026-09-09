@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, ShieldHalf } from "lucide-react";
+import { ArrowLeft, ShieldHalf, Users } from "lucide-react";
 import { adminLogin } from "../api";
 import type { AdminUser } from "../types";
 import { Button } from "../components/ui/button";
@@ -7,7 +7,18 @@ import { Button } from "../components/ui/button";
 // Grown-up surfaces (admin, and eventually a parent dashboard) get the
 // warm ".parchment" scope instead of the child-facing night-sky/gold
 // system - see src/styles.css and plan/Lovable-Design-Migration-Plan.md.
-export function AdminLogin({ onBack, onLoggedIn }: { onBack: () => void; onLoggedIn: (admin: AdminUser) => void }) {
+export function AdminLogin({
+  intent = "admin",
+  onBack,
+  onLoggedIn,
+}: {
+  // Same one admin account either way - this only changes the copy and
+  // icon, not what credentials are checked. See App.tsx's Screen type
+  // for why there is no separate "parent" role.
+  intent?: "admin" | "parent";
+  onBack: () => void;
+  onLoggedIn: (admin: AdminUser) => void;
+}) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -37,11 +48,11 @@ export function AdminLogin({ onBack, onLoggedIn }: { onBack: () => void; onLogge
         <div className="rounded-2xl border border-border bg-card p-8">
           <div className="flex items-center gap-3">
             <span className="grid size-11 shrink-0 place-items-center rounded-full bg-secondary text-primary">
-              <ShieldHalf className="size-5" />
+              {intent === "parent" ? <Users className="size-5" /> : <ShieldHalf className="size-5" />}
             </span>
             <div>
               <p className="text-xs font-semibold tracking-[0.24em] text-muted-foreground uppercase">Puzzle Kingdom</p>
-              <h1 className="text-2xl">Admin login</h1>
+              <h1 className="text-2xl">{intent === "parent" ? "Parent login" : "Admin login"}</h1>
             </div>
           </div>
 

@@ -247,11 +247,17 @@ function buildQuery(params: Record<string, string | number | undefined>): string
   return qs ? `?${qs}` : "";
 }
 
-export function getReports(params: { classId?: string; subjectName?: string; limit?: number } = {}): Promise<AttemptReport[]> {
+// profileId is honored by the backend only for an admin-authenticated
+// caller (see reportRoutes' own comment in routes/reports.ts) - a
+// profile session always gets forced back to its own id regardless of
+// what's passed here, so this is safe to expose to any caller. Used by
+// ParentDashboard.tsx to scope one child's reports without that child
+// needing to be logged in on this device.
+export function getReports(params: { classId?: string; subjectName?: string; limit?: number; profileId?: string } = {}): Promise<AttemptReport[]> {
   return apiFetch(`/reports${buildQuery(params)}`).then((res) => asJson(res));
 }
 
-export function getTopicReports(params: { classId?: string; subjectName?: string } = {}): Promise<TopicReport[]> {
+export function getTopicReports(params: { classId?: string; subjectName?: string; profileId?: string } = {}): Promise<TopicReport[]> {
   return apiFetch(`/reports/topics${buildQuery(params)}`).then((res) => asJson(res));
 }
 

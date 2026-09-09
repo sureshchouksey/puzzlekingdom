@@ -9,6 +9,7 @@ import { Reports } from "./screens/Reports";
 import { Leaderboard } from "./screens/Leaderboard";
 import { AdminLogin } from "./screens/AdminLogin";
 import { AdminDashboard } from "./screens/AdminDashboard";
+import { ParentDashboard } from "./screens/ParentDashboard";
 import { StudyBuddy } from "./screens/StudyBuddy";
 import type { AdminUser, AssembleQuizResponse, PkClass, Profile, TutorQuestionContext } from "./types";
 
@@ -21,8 +22,13 @@ type Screen =
   | { name: "results"; attemptId: string }
   | { name: "reports" }
   | { name: "leaderboard" }
-  | { name: "adminLogin" }
+  // intent decides where a successful login lands - the raw admin
+  // tools, or the friendlier parent summary view (ParentDashboard.tsx).
+  // Both share the same one admin account; there is no separate
+  // "parent" role on the backend, since this is a single-family app.
+  | { name: "adminLogin"; intent: "admin" | "parent" }
   | { name: "adminDashboard" }
+  | { name: "parentDashboard" }
   | { name: "studyBuddyClassPicker" }
   // Exactly one of pkClass/questionContext is set, depending on which
   // entry point led here (Home's general chat vs. "Explain this to me"
@@ -46,7 +52,8 @@ export default function App() {
             setProfile(enteredProfile);
             setScreen({ name: "home" });
           }}
-          onAdminLogin={() => setScreen({ name: "adminLogin" })}
+          onAdminLogin={() => setScreen({ name: "adminLogin", intent: "admin" })}
+          onParentDashboard={() => setScreen({ name: "adminLogin", intent: "parent" })}
         />
       );
     case "home":
@@ -75,8 +82,8 @@ export default function App() {
       // renders - but guard defensively rather than pass null through.
       if (!profile) {
         return (
-          <main style={{ maxWidth: 640, margin: "60px auto", padding: "0 24px" }}>
-            <p style={{ color: "#5a5148" }}>Something went wrong - please refresh and pick a player again.</p>
+          <main className="night-sky flex min-h-screen items-center justify-center px-6">
+            <p className="text-muted-foreground">Something went wrong - please refresh and pick a player again.</p>
           </main>
         );
       }
@@ -114,24 +121,44 @@ export default function App() {
     case "adminLogin":
       return (
         <AdminLogin
+          intent={screen.intent}
           onBack={() => setScreen({ name: "welcome" })}
           onLoggedIn={(loggedInAdmin) => {
             setAdmin(loggedInAdmin);
-            setScreen({ name: "adminDashboard" });
+            if (screen.intent === "parent") setScreen({ name: "parentDashboard" });
+            else setScreen({ name: "adminDashboard" });
           }}
         />
       );
     case "adminDashboard":
       if (!admin) {
         return (
-          <main style={{ maxWidth: 640, margin: "60px auto", padding: "0 24px" }}>
-            <p style={{ color: "#5a5148" }}>Something went wrong - please log in again.</p>
+          <main className="parchment flex min-h-screen items-center justify-center px-6">
+            <p className="text-muted-foreground">Something went wrong - please log in again.</p>
           </main>
         );
       }
       return (
         <AdminDashboard
           admin={admin}
+          onLogOut={() => {
+            setAdmin(null);
+            setScreen({ name: "welcome" });
+          }}
+        />
+      );
+    case "parentDashboard":
+      if (!admin) {
+        return (
+          <main className="parchment flex min-h-screen items-center justify-center px-6">
+            <p className="text-muted-foreground">Something went wrong - please log in again.</p>
+          </main>
+        );
+      }
+      return (
+        <ParentDashboard
+          onBack={() => setScreen({ name: "welcome" })}
+          onOpenAdminTools={() => setScreen({ name: "adminDashboard" })}
           onLogOut={() => {
             setAdmin(null);
             setScreen({ name: "welcome" });
