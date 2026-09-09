@@ -41,10 +41,15 @@ const STAGE_SIZE = 10;
 // resume-by-attempt tracking Topic Practice does.
 const QUEST_STAGE_SIZE = 9999;
 
-// A topic counts as mastered at the same accuracy bar Reports.tsx uses for
-// its "emerald" (green) tier, so "quest complete" here means the same
-// thing "doing well" means everywhere else in the app.
-const COMPLETE_THRESHOLD = 0.75;
+// A topic counts as mastered at the same 70% bar Quiz.tsx uses to pass a
+// stage (STAGE_PASS_THRESHOLD on the backend) - "quest complete" here means
+// the same thing "cleared" means everywhere else in the app, and lines up
+// with the bottom of the star band just below (70% = the first star).
+const COMPLETE_THRESHOLD = 0.7;
+
+// Every quest node earns 0-4 stars from its topic accuracy - matches the
+// star count shown in the Lovable reference's quest map.
+const MAX_STARS = 4;
 
 const JEWELS = ["emerald", "sapphire", "ruby", "amethyst", "gold"] as const;
 type Jewel = (typeof JEWELS)[number];
@@ -83,6 +88,18 @@ function subjectVisual(name: string, index: number): { icon: typeof Calculator; 
   return { icon: Sparkles, jewel: JEWELS[index % JEWELS.length] };
 }
 
+// Gives each subject's Quest Journey its own Lovable-style "world" name for
+// the map header and the bottom subject-switcher, instead of the plain
+// subject name - same recognition rules as subjectVisual above.
+function worldName(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes("math")) return "Numberwood";
+  if (lower.includes("english") || lower.includes("liter")) return "Wordhaven";
+  if (lower.includes("science")) return "Sparkfall";
+  if (lower.includes("art")) return "Colorglade";
+  return `${name} Realm`;
+}
+
 type NodeState = "completed" | "current" | "locked";
 type QuestNode = QuestJourneyItem & { state: NodeState; accuracy: number | null };
 
@@ -105,11 +122,15 @@ function buildQuestNodes(items: QuestJourneyItem[], accuracyFor: (item: QuestJou
   });
 }
 
+// 70% = 1 star, 80% = 2, 90% = 3, 100% = 4 - matches the Lovable
+// reference's quest map star bands.
 function starsFor(accuracy: number | null): number {
   if (accuracy === null) return 0;
-  if (accuracy >= 0.95) return 3;
-  if (accuracy >= 0.85) return 2;
-  return 1;
+  if (accuracy >= 1) return 4;
+  if (accuracy >= 0.9) return 3;
+  if (accuracy >= 0.8) return 2;
+  if (accuracy >= 0.7) return 1;
+  return 0;
 }
 
 type InProgress = { attemptId: string; topic: string | null; stagesCleared: number; totalStages: number };
@@ -256,6 +277,8 @@ export function SubjectPicker({
         )
       : null;
   const doneCount = questNodes?.filter((n) => n.state === "completed").length ?? 0;
+  const totalStars =
+    questNodes?.reduce((sum, n) => sum + (n.state === "completed" ? starsFor(n.accuracy) : 0), 0) ?? 0;
   // The last topic in the journey is rendered as a distinct "final challenge"
   // castle node (Lovable reference: a Castle-of-Counting-style centered,
   // glowing node), separate from the alternating-line path of the topics
@@ -278,16 +301,28 @@ export function SubjectPicker({
           </Button>
           <div className="text-center">
             <p className={`text-xs font-semibold tracking-[0.28em] uppercase ${step === "subject" ? "text-primary/80" : JEWEL_TEXT[jewel]}`}>
-              {step === "subject" ? "Choose your subject" : `${pkClass.name} · ${selectedSubject}`}
+              {step === "subject" && "Choose your subject"}
+              {step === "mode" && `${pkClass.name} · ${selectedSubject}`}
+              {step === "quest" && `${selectedSubject} quests`}
+              {step === "practice" && `${pkClass.name} · ${selectedSubject}`}
             </p>
             <h1 className="text-gold-shimmer text-3xl sm:text-4xl">
               {step === "subject" && "Pick a subject"}
               {step === "mode" && "How do you want to practice?"}
-              {step === "quest" && "Quest Journey"}
+              {step === "quest" && selectedSubject && worldName(selectedSubject)}
               {step === "practice" && "Topic Practice"}
             </h1>
           </div>
-          <span className="size-9" />
+          {step === "quest" && questNodes !== null && questNodes.length > 0 ? (
+            <span
+              className={`flex shrink-0 items-center gap-1.5 rounded-full bg-card/70 px-3.5 py-2 text-sm font-display font-bold ${JEWEL_TEXT[jewel]}`}
+            >
+              <Star className="size-4 fill-current" />
+              {totalStars}
+            </span>
+          ) : (
+            <span className="size-9" />
+          )}
         </header>
 
         {step === "subject" && (
@@ -388,7 +423,8 @@ export function SubjectPicker({
                     />
                   </div>
                   <p className="mt-2 pb-1 text-center text-xs font-semibold text-muted-foreground">
-                    {doneCount} of {questNodes.length} quests complete
+                    {doneCount} of {questNodes.length} quest{questNodes.length === 1 ? "" : "s"} complete
+                    {finalNode && finalNode.state !== "completed" ? ` — next stop, ${finalNode.topic}` : ""}
                   </p>
                 </div>
 
@@ -415,7 +451,7 @@ export function SubjectPicker({
                             <p className="text-lg font-display font-bold">{node.topic}</p>
                             {node.state === "completed" && (
                               <p className={`mt-1 flex items-center gap-1 text-sm ${JEWEL_TEXT[jewel]} sm:justify-end`}>
-                                {Array.from({ length: 3 }).map((_, s) => (
+                                {Array.from({ length: MAX_STARS }).map((_, s) => (
                                   <Star
                                     key={s}
                                     className={`size-4 ${s < starsFor(node.accuracy) ? "fill-current" : "opacity-30"}`}
@@ -467,7 +503,7 @@ export function SubjectPicker({
                       {finalNode.state === "completed" && (
                         <>
                           <p className={`mt-1 flex items-center justify-center gap-1 text-sm ${JEWEL_TEXT[jewel]}`}>
-                            {Array.from({ length: 3 }).map((_, s) => (
+                            {Array.from({ length: MAX_STARS }).map((_, s) => (
                               <Star
                                 key={s}
                                 className={`size-4 ${s < starsFor(finalNode.accuracy) ? "fill-current" : "opacity-30"}`}
@@ -505,6 +541,30 @@ export function SubjectPicker({
                     </div>
                   )}
                 </div>
+
+                {/* Lets the player jump straight to another subject's quest
+                    map without backing out through the mode/subject steps -
+                    same bottom world-switcher the Lovable reference shows. */}
+                {subjects && subjects.length > 1 && (
+                  <div className="mt-12 flex flex-wrap justify-center gap-2 pb-2">
+                    {subjects.map((s, i) => {
+                      const isActive = s.name === selectedSubject;
+                      return (
+                        <button
+                          key={s.id}
+                          onClick={() => setSelectedSubject(s.name)}
+                          className={`rounded-full px-4 py-2 text-sm font-display font-bold transition-colors ${
+                            isActive
+                              ? `${JEWEL_FILL[subjectVisual(s.name, i).jewel]} text-background`
+                              : "bg-secondary/70 text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {worldName(s.name)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             )}
           </section>
