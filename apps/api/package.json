@@ -17,6 +17,7 @@
     "seed:fun-content": "tsx --env-file=.env scripts/seed-fun-content.ts",
     "test:tutor-intent": "tsx --env-file=.env scripts/test-tutor-intent.ts",
     "create-admin": "tsx --env-file=.env scripts/create-admin.ts",
+    "create-family": "tsx --env-file=.env scripts/create-family.ts",
     "test:e2e": "tsx --env-file=.env scripts/test-e2e.ts",
     "test:tutor-retrieval": "tsx --env-file=.env scripts/test-tutor-retrieval.ts",
     "test:tutor-generation": "tsx --env-file=.env scripts/test-tutor-generation.ts",

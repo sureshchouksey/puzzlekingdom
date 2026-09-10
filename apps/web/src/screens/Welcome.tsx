@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Delete, ShieldHalf, Users } from "lucide-react";
+import { ShieldHalf } from "lucide-react";
 import { lookupProfile, setProfilePin, verifyProfilePin } from "../api";
 import type { Profile, ProfileLookupResponse } from "../types";
 import { Button } from "../components/ui/button";
-import { PRINCE_AVATARS, PRINCESS_AVATARS, type Title } from "../avatars";
+import { AvatarPicker } from "../components/AvatarPicker";
+import { StarPinDots, PinKeypad } from "../components/PinPad";
+import type { Title } from "../avatars";
 
 // PRINCE_AVATARS/PRINCESS_AVATARS now live in ../avatars.ts - shared
 // with Leaderboard.tsx so the two can't drift out of sync.
@@ -29,50 +31,6 @@ function capitalize(value: string) {
   return value.trim().charAt(0).toUpperCase() + value.trim().slice(1);
 }
 
-// The Lovable reference's 4-star PIN display + numeric keypad
-// (pixel-perfect-replica/src/routes/index.tsx), generalized to drive an
-// arbitrary 4-digit field via onChange rather than one hardcoded piece of
-// state - setPin needs two of these (PIN + Confirm) sharing one keypad.
-function StarPinDots({ value }: { value: string }) {
-  return (
-    <div className="flex justify-center gap-3">
-      {[0, 1, 2, 3].map((i) => (
-        <span
-          key={i}
-          className={`size-12 rounded-2xl border-2 text-2xl leading-[2.6rem] font-bold ${
-            value.length > i
-              ? "border-primary bg-primary/15 text-primary"
-              : "border-border bg-secondary/60"
-          }`}
-        >
-          {value.length > i ? "★" : ""}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function PinKeypad({ onDigit, onBackspace, onBack }: { onDigit: (d: string) => void; onBackspace: () => void; onBack: () => void }) {
-  return (
-    <div className="mt-7 grid grid-cols-3 gap-3">
-      {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
-        <Button key={d} type="button" variant="secondary" size="lg" className="h-14 text-xl" onClick={() => onDigit(d)}>
-          {d}
-        </Button>
-      ))}
-      <Button type="button" variant="ghost" size="lg" className="h-14" onClick={onBack}>
-        Back
-      </Button>
-      <Button type="button" variant="secondary" size="lg" className="h-14 text-xl" onClick={() => onDigit("0")}>
-        0
-      </Button>
-      <Button type="button" variant="ghost" size="lg" className="h-14" onClick={onBackspace}>
-        <Delete className="size-5" />
-      </Button>
-    </div>
-  );
-}
-
 // Entering the kingdom: type your own name (no list of everyone else's to
 // click through), then either set a 4-digit PIN (a brand-new name, or an
 // older profile from before PINs existed) or enter your existing one -
@@ -80,11 +38,16 @@ function PinKeypad({ onDigit, onBackspace, onBack }: { onDigit: (d: string) => v
 // name.
 export function Welcome({
   onEnter,
-  onAdminLogin,
   onParentDashboard,
 }: {
   onEnter: (profile: Profile) => void;
-  onAdminLogin: () => void;
+  // Single grown-up entry point (10 September 2026): family-owner login
+  // and the platform-admin/parent login used to be two separate footer
+  // links here - see ParentLogin.tsx for why they're now one screen. A
+  // family owner logging in from there sees only their own kids' profiles
+  // (routes/families.ts), separate from this screen's private "type any
+  // name" flow, which still works unchanged for every profile not yet
+  // claimed by a family.
   onParentDashboard: () => void;
 }) {
   const [step, setStep] = useState<Step>({ kind: "name" });
@@ -229,36 +192,10 @@ export function Welcome({
           {step.kind === "newTitle" && (
             <>
               <p className="text-sm text-muted-foreground">Hi {step.looked.name}! Pick your avatar.</p>
-              <div className="mt-6 space-y-6 text-left">
-                {(
-                  [
-                    { title: "Prince" as const, avatars: PRINCE_AVATARS },
-                    { title: "Princess" as const, avatars: PRINCESS_AVATARS },
-                  ]
-                ).map((group) => (
-                  <div key={group.title}>
-                    <p className="mb-3 text-center text-xs font-semibold tracking-[0.2em] text-muted-foreground uppercase">
-                      {group.title}
-                    </p>
-                    <div className="grid grid-cols-5 gap-2">
-                      {group.avatars.map((a) => (
-                        <button
-                          key={a.id}
-                          type="button"
-                          onClick={() => setStep({ kind: "setPin", looked: step.looked, title: a.title, avatarId: a.id })}
-                          aria-label={`${a.title} avatar ${a.id}`}
-                          className="group flex items-center justify-center rounded-2xl p-1 transition-transform hover:-translate-y-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                        >
-                          <img
-                            src={a.file}
-                            alt=""
-                            className="size-12 rounded-full border-2 border-border bg-secondary object-cover shadow-inner transition-colors group-hover:border-primary/60 sm:size-14"
-                          />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+              <div className="mt-6">
+                <AvatarPicker
+                  onPick={(title, avatarId) => setStep({ kind: "setPin", looked: step.looked, title, avatarId })}
+                />
               </div>
             </>
           )}
@@ -349,15 +286,8 @@ export function Welcome({
             onClick={onParentDashboard}
             className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground/70 transition-colors hover:text-primary"
           >
-            <Users className="size-3.5" />
-            Parent dashboard
-          </button>
-          <button
-            onClick={onAdminLogin}
-            className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground/70 transition-colors hover:text-primary"
-          >
             <ShieldHalf className="size-3.5" />
-            Admin login
+            Parent dashboard
           </button>
         </footer>
       </div>

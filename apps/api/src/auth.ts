@@ -9,7 +9,8 @@ import { env } from "./env.js";
 // behave differently for profile vs admin callers (e.g. /reports).
 export type Identity =
   | { kind: "profile"; profileId: string; name: string }
-  | { kind: "admin"; adminId: string; username: string };
+  | { kind: "admin"; adminId: string; username: string }
+  | { kind: "family_owner"; familyId: string; ownerId: string; email: string };
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -57,5 +58,14 @@ export async function requireIdentity(request: FastifyRequest, reply: FastifyRep
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply) {
   if (request.identity?.kind !== "admin") {
     reply.status(403).send({ error: "Admin access required" });
+  }
+}
+
+// preHandler: 403s unless the caller is a logged-in family owner. Used by
+// routes/families.ts's "my family" endpoints - a profile or admin token
+// (or no token) all fail this check, same shape as requireAdmin above.
+export async function requireFamilyOwner(request: FastifyRequest, reply: FastifyReply) {
+  if (request.identity?.kind !== "family_owner") {
+    reply.status(403).send({ error: "Family login required" });
   }
 }

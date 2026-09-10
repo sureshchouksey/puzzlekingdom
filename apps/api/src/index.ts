@@ -11,6 +11,7 @@ import { profileRoutes } from "./routes/profiles.js";
 import { leaderboardRoutes } from "./routes/leaderboard.js";
 import { registerAuth } from "./auth.js";
 import { adminRoutes } from "./routes/admin.js";
+import { familyRoutes } from "./routes/families.js";
 import { tutorRoutes } from "./routes/tutor.js";
 import { gameRoutes } from "./routes/games.js";
 import { closeDb } from "./db/client.js";
@@ -59,6 +60,7 @@ await app.register(reportRoutes);
 await app.register(profileRoutes);
 await app.register(leaderboardRoutes);
 await app.register(adminRoutes);
+await app.register(familyRoutes);
 await app.register(tutorRoutes);
 await app.register(gameRoutes);
 

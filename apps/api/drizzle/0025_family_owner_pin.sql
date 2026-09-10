@@ -1,0 +1,15 @@
+-- Family owner login: switch from email+password to email+4-digit PIN
+-- (10 September 2026, per direct user instruction after trying the
+-- family-login flow live: "Now family owner can login from parent
+-- dashboard with their own PIN"). Matches the same PIN pattern a child
+-- profile already uses (profiles.pin_hash) - a real password felt like
+-- the wrong weight for this app's actual threat model, and reusing the
+-- keypad UI gives the family owner the exact same familiar login as
+-- their kids. Column is renamed, not dropped/recreated, so no data is
+-- lost - but the *value* already stored for any existing owner (e.g.
+-- migration 0024's first real row) is a bcrypt hash of their original
+-- password, not a 4-digit PIN, so it will no longer verify against a
+-- typed PIN. Any existing family_owners row needs its PIN reset - the
+-- updated scripts/create-family.ts (now --pin instead of --password) is
+-- the way to do that, same upsert-by-email pattern as before.
+alter table family_owners rename column password_hash to pin_hash;
