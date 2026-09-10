@@ -58,7 +58,7 @@ function shuffled<T>(items: T[]): T[] {
 // match_column is the one type where the child needs SOME of the payload
 // up front - the left/right lists to build pairs from - so only
 // correctPairs (the answer key) is stripped, not the lists themselves.
-function assemblyAnswerPayload(
+export function assemblyAnswerPayload(
   questionType: string,
   answerPayload: Record<string, unknown> | null
 ): { left: unknown; right: unknown } | null {

@@ -30,6 +30,7 @@ import type {
   TopicReport,
 } from "../types";
 import { Button } from "../components/ui/button";
+import { Arcade } from "./Arcade";
 
 // "Topic Practice" quizzes clear in stages of 10 questions, tracked and
 // resumable (see QuizInProgress below) - the "serious study" mode.
@@ -139,7 +140,7 @@ function starsFor(accuracy: number | null): number {
 
 type InProgress = { attemptId: string; topic: string | null; stagesCleared: number; totalStages: number };
 
-type Mode = "quest" | "practice";
+type Mode = "quest" | "practice" | "games";
 
 export function SubjectPicker({
   pkClass,
@@ -274,10 +275,10 @@ export function SubjectPicker({
     }
   }
 
-  const step: "subject" | "mode" | "quest" | "practice" = !selectedSubject ? "subject" : !mode ? "mode" : mode;
+  const step: "subject" | "mode" | "quest" | "practice" | "games" = !selectedSubject ? "subject" : !mode ? "mode" : mode;
 
   function goBack() {
-    if (step === "quest" || step === "practice") setMode(null);
+    if (step === "quest" || step === "practice" || step === "games") setMode(null);
     else if (step === "mode") setSelectedSubject(null);
     else onBack();
   }
@@ -321,12 +322,14 @@ export function SubjectPicker({
               {step === "mode" && `${pkClass.name} · ${selectedSubject}`}
               {step === "quest" && `${selectedSubject} quests`}
               {step === "practice" && `${pkClass.name} · ${selectedSubject}`}
+              {step === "games" && `${pkClass.name} · ${selectedSubject}`}
             </p>
             <h1 className="text-gold-shimmer text-3xl sm:text-4xl">
               {step === "subject" && "Pick a subject"}
               {step === "mode" && "How do you want to practice?"}
               {step === "quest" && selectedSubject && worldName(selectedSubject)}
               {step === "practice" && "Topic Practice"}
+              {step === "games" && "Arcade"}
             </h1>
           </div>
           {step === "quest" && questNodes !== null && questNodes.length > 0 ? (
@@ -413,9 +416,39 @@ export function SubjectPicker({
                   </span>
                 </span>
               </button>
+
+              <button
+                onClick={() => setMode("games")}
+                style={{ animationDelay: "180ms" }}
+                className="animate-pop-in shadow-quest flex items-center gap-4 rounded-3xl border border-border/70 bg-card/85 p-6 text-left backdrop-blur transition-transform hover:-translate-y-1 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <span className={`animate-float grid size-16 shrink-0 place-items-center rounded-full bg-secondary shadow-inner ${JEWEL_TEXT[jewel]}`}>
+                  <Gamepad2 className="size-8" />
+                </span>
+                <span className="flex-1">
+                  <span className="block text-xl font-display font-bold">Arcade</span>
+                  <span className="block text-sm text-muted-foreground">
+                    Quick-fire practice games - no stages, just a fast round and a streak.
+                  </span>
+                </span>
+              </button>
             </div>
           </section>
         )}
+
+        {step === "games" && selectedSubject && (() => {
+          const subjectId = subjects?.find((s) => s.name === selectedSubject)?.id;
+          if (!subjectId) return null;
+          return (
+            <Arcade
+              pkClass={pkClass}
+              subjectId={subjectId}
+              subjectName={selectedSubject}
+              profile={profile}
+              onExit={() => setMode(null)}
+            />
+          );
+        })()}
 
         {step === "quest" && (
           <section className="mx-auto mt-6 w-full max-w-2xl flex-1">

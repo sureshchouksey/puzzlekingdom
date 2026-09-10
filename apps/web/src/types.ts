@@ -68,6 +68,37 @@ export type QuizQuestion = {
   topics: string[] | null;
 };
 
+// The Arcade's 5 games (see plan/Question-Types-and-Content-Authoring-Plan.md
+// "Practice games (the Arcade)" and apps/api/src/routes/games.ts's
+// GAME_DEFINITIONS, which this mirrors exactly).
+export type GameKey =
+  | "spelling_sprint"
+  | "missing_letters"
+  | "word_meaning_match"
+  | "homophone_hunter"
+  | "prefix_suffix_builder";
+
+// One question as returned by GET /games/round - deliberately carries the
+// FULL answer key (correctOptionId / answerPayload, not stripped the way
+// QuizQuestion's is), because Arcade rounds grade themselves instantly in
+// the browser rather than round-tripping to the server per question - see
+// the comment on that route for why this is a safe, intentional
+// difference from the graded quiz's spoiler-withholding rule.
+export type GameQuestion = {
+  id: string;
+  questionText: string;
+  questionType: QuestionType;
+  options: QuizOption[];
+  correctOptionId: string | null;
+  answerPayload: AnswerPayload | null;
+  imageUrl: string | null;
+};
+
+export type GameRoundResponse = {
+  game: GameKey;
+  questions: GameQuestion[];
+};
+
 export type AssembleQuizResponse = {
   attemptId: string;
   subjectName: string;

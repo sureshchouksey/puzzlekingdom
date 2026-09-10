@@ -12,6 +12,7 @@ import { leaderboardRoutes } from "./routes/leaderboard.js";
 import { registerAuth } from "./auth.js";
 import { adminRoutes } from "./routes/admin.js";
 import { tutorRoutes } from "./routes/tutor.js";
+import { gameRoutes } from "./routes/games.js";
 import { closeDb } from "./db/client.js";
 
 // forceCloseConnections: without this, app.close() waits for any open
@@ -59,6 +60,7 @@ await app.register(profileRoutes);
 await app.register(leaderboardRoutes);
 await app.register(adminRoutes);
 await app.register(tutorRoutes);
+await app.register(gameRoutes);
 
 app.listen({ port: env.PORT, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);

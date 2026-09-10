@@ -10,6 +10,8 @@ import type {
   AssembleQuizResponse,
   AttemptReport,
   EstimateResponse,
+  GameKey,
+  GameRoundResponse,
   GenerateResponse,
   LeaderboardEntry,
   PkClass,
@@ -258,6 +260,33 @@ export function submitStage(params: {
 
 export function getResults(attemptId: string): Promise<QuizResults> {
   return apiFetch(`/quizzes/${attemptId}/results`).then((res) => asJson(res));
+}
+
+// The Arcade - see routes/games.ts. `count` is optional (backend
+// defaults to 10, clamped to 30). Unlike assembleQuiz, this doesn't
+// create a resumable attempt row - a round is played start to finish in
+// one sitting, and only recorded afterward via recordGameAttempt.
+export function getGameRound(params: { game: GameKey; classId?: string; subjectName?: string; count?: number }): Promise<GameRoundResponse> {
+  return apiFetch(`/games/round${buildQuery(params)}`).then((res) => asJson(res));
+}
+
+// Reports one finished round and returns the stars it earned (same
+// star-band as a graded quiz stage - see lib/scoring.ts's
+// starsForPercent) - these fold into the leaderboard total alongside
+// quiz stars.
+export function recordGameAttempt(params: {
+  profileId?: string;
+  classId?: string;
+  subjectId?: string;
+  gameKey: GameKey;
+  correctCount: number;
+  totalCount: number;
+}): Promise<{ attemptId: string; starsEarned: number }> {
+  return apiFetch(`/games/attempts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  }).then((res) => asJson(res));
 }
 
 export function saveManualQuestions(params: SaveManualQuestionsParams): Promise<SaveManualQuestionsResponse> {

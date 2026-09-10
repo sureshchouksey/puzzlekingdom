@@ -269,6 +269,7 @@ export const profilesRelations = relations(profiles, ({ many }) => ({
   attempts: many(quizAttempts),
   tutorConversations: many(tutorConversations),
   tutorGrowthInsights: many(tutorGrowthInsights),
+  gameAttempts: many(gameAttempts),
 }));
 
 export const documentsRelations = relations(documents, ({ one, many }) => ({
@@ -417,4 +418,40 @@ export const tutorGrowthInsights = pgTable("tutor_growth_insights", {
 
 export const tutorGrowthInsightsRelations = relations(tutorGrowthInsights, ({ one }) => ({
   profile: one(profiles, { fields: [tutorGrowthInsights.profileId], references: [profiles.id] }),
+}));
+
+// The Arcade: informal, repeatable practice games (Spelling Sprint, Word
+// Meaning Match, Homophone Hunter, Prefix/Suffix Builder, Missing
+// Letters) - see migration 0021 and "Practice games (the Arcade)" in
+// plan/Question-Types-and-Content-Authoring-Plan.md. One row per
+// completed round (a batch of questions played in one sitting), not per
+// question - distinct from quizAttempts (the graded stage-based quiz),
+// but stars_earned uses the exact same star-band function
+// (starsForPercent in lib/scoring.ts) so "stars" mean the same thing
+// everywhere the leaderboard adds them up.
+export const gameAttempts = pgTable("game_attempts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // Nullable - an attempt with no profile selected simply doesn't count
+  // toward that profile's stars, same convention as quizAttempts.profileId.
+  profileId: uuid("profile_id").references(() => profiles.id),
+  // Both nullable - a round can be played with no class/subject filter
+  // (games.ts falls back to "any"), matching quizAttempts.topic's
+  // optional-filter convention.
+  classId: uuid("class_id").references(() => classes.id),
+  subjectId: uuid("subject_id").references(() => subjects.id),
+  // 'spelling_sprint' | 'word_meaning_match' | 'homophone_hunter' |
+  // 'prefix_suffix_builder' | 'missing_letters' - free-text, same
+  // convention as tutorConversations.contextType/funContent.contentType
+  // rather than a fixed Postgres enum.
+  gameKey: text("game_key").notNull(),
+  correctCount: integer("correct_count").notNull(),
+  totalCount: integer("total_count").notNull(),
+  starsEarned: integer("stars_earned").notNull().default(0),
+  playedAt: timestamp("played_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const gameAttemptsRelations = relations(gameAttempts, ({ one }) => ({
+  profile: one(profiles, { fields: [gameAttempts.profileId], references: [profiles.id] }),
+  class: one(classes, { fields: [gameAttempts.classId], references: [classes.id] }),
+  subject: one(subjects, { fields: [gameAttempts.subjectId], references: [subjects.id] }),
 }));
