@@ -134,18 +134,29 @@ values (
 );
 
 -- short_answer
+-- Dollar-quoted text ($q$...$q$) and jsonb_build_object instead of a raw
+-- JSON string literal - this one hit a paste-truncation error in the
+-- Supabase SQL Editor as a plain single-quoted statement, so it's
+-- written defensively to avoid any single/double-quote nesting.
 insert into questions (document_id, subject_id, question_text, options, correct_option_id, explanation, topics, tip, question_type, answer_payload)
 values (
   (select id from documents where storage_path = 'seed:claude-sample-english-all-types'),
   (select id from subjects where name = 'English'),
-  'In one sentence, explain why we use a capital letter at the start of a sentence.',
+  $q$In one sentence, explain why we use a capital letter at the start of a sentence.$q$,
   '[]'::jsonb,
   '',
-  'A capital letter at the start of a sentence shows the reader exactly where a new sentence begins, which makes writing much easier to read.',
+  $e$A capital letter at the start of a sentence shows the reader exactly where a new sentence begins, which makes writing much easier to read.$e$,
   array['Writing'],
-  'Think about how confusing a paragraph would be to read if every sentence just ran into the next with no clear starting point.',
+  $t$Think about how confusing a paragraph would be to read if every sentence just ran into the next with no clear starting point.$t$,
   'short_answer',
-  '{"rubricKeyPoints": ["Shows where a new sentence begins", "Makes writing clearer to read", "Also used for proper nouns and the word I"]}'::jsonb
+  jsonb_build_object(
+    'rubricKeyPoints',
+    array[
+      'Shows where a new sentence begins',
+      'Makes writing clearer to read',
+      'Also used for proper nouns and the word I'
+    ]
+  )
 );
 
 -- long_answer
