@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { eq, and, desc, gte } from "drizzle-orm";
+import { eq, and, desc, gte, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { classes, subjects, tutorConversations, tutorMessages } from "../db/schema.js";
 import { requireIdentity } from "../auth.js";
@@ -14,7 +14,17 @@ import {
   formatFunContentReply,
   formatFunContentAnswer,
   formatFunContentHint,
+  type FunContentItem,
 } from "../services/funContent.js";
+import {
+  pickQuizQuestion,
+  getQuizQuestionById,
+  formatQuizQuestionReply,
+  formatQuizAnswerReveal,
+  formatQuizHint,
+  checkQuizAnswer,
+  type QuizGameQuestion,
+} from "../services/tutorQuizGame.js";
 import { buildGreeting } from "../services/tutorProgress.js";
 
 // The AI Study Mentor's actual routes - see plan/AI-Study-Mentor-Agent-Plan.md,
@@ -63,29 +73,59 @@ const INCORRECT_GUESS_REPLIES = [
   "Close, but not quite - want to guess again, or see the answer?",
 ];
 
+// The quiz-game's own counterpart to the two arrays above - kept
+// separate (rather than reused) so a real practice question gets replies
+// that read as "you're learning your actual lessons" rather than "you're
+// a riddle master", matching formatQuizAnswerReveal/formatQuizHint's own
+// tone (tutorQuizGame.ts).
+const QUIZ_CORRECT_REPLIES = [
+  "That's correct! Great work!",
+  "Yes, exactly right!",
+  "Correct! You really know this one!",
+];
+const QUIZ_INCORRECT_REPLIES = [
+  "Not quite! Want a hint, or should I tell you the answer?",
+  "Good try, but that's not it! Want a hint, or should I show you the answer?",
+  "Close, but not quite right - want a hint, or to see the answer?",
+];
+
 function pickRandom<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-// Was a riddle/joke/puzzle/trivia question - or this app's own offer to
-// reveal one after a wrong guess - the very last thing said in this
-// conversation? If so, the child's next message is very likely about that
-// question (see tutorIntent.ts's answer_attempt/reveal_answer intents and
-// the context-aware classification they do), not a fresh request or lesson
-// question. Deliberately strict about "the very last message" - once
-// anything else has happened since (a reveal, a correct guess, a new
-// fun-content item, an academic reply), the window closes and the next
-// message is classified fresh instead of being forced against a stale
-// question. Returns null (nothing pending) when the item has no answerText
-// at all (e.g. a tongue twister) - there's nothing to guess or reveal.
+// A pending "something to guess" state, generalized 9 September 2026 to
+// cover TWO different content sources sharing one mechanism: a riddle/
+// joke/puzzle/trivia item from fun_content (the original design), or a
+// real curriculum question from the quiz game (tutorQuizGame.ts, added
+// for the "ask real questions from my lessons" feature). Only one can
+// ever be pending at once - the very last message in a conversation has
+// exactly one matchedSourceType - so this is a discriminated union on
+// `kind`, not two independent booleans.
+type PendingInteractive =
+  | { kind: "fun_content"; item: FunContentItem; offeredReveal: boolean }
+  | { kind: "quiz_question"; item: QuizGameQuestion; offeredReveal: boolean };
+
+// Was a riddle/joke/puzzle/trivia question, a real practice question, or
+// this app's own offer to reveal one after a wrong guess - the very last
+// thing said in this conversation? If so, the child's next message is
+// very likely about that question (see tutorIntent.ts's answer_attempt/
+// reveal_answer intents and the context-aware classification they do),
+// not a fresh request or lesson question. Deliberately strict about "the
+// very last message" - once anything else has happened since (a reveal,
+// a correct guess, a new item, an academic reply), the window closes and
+// the next message is classified fresh instead of being forced against a
+// stale question. Returns null (nothing pending) when a fun_content item
+// has no answerText at all (e.g. a tongue twister) - there's nothing to
+// guess or reveal.
 //
 // `offeredReveal` on the return value distinguishes the two states: false
 // means the original question was just asked (a plain guess is expected
 // next); true means the child already guessed wrong once and was just
 // asked "want a hint, or should I tell you the answer?" (see tutor.ts's
-// INCORRECT_GUESS_REPLIES below) - a short "yes"/"sure" next should be
-// read as accepting that offer, not as another blind guess.
-async function getPendingFunContent(conversationId: string) {
+// INCORRECT_GUESS_REPLIES/QUIZ_INCORRECT_REPLIES below) - a short
+// "yes"/"sure" next should be read as accepting that offer, not as
+// another blind guess.
+async function getPendingInteractive(conversationId: string): Promise<PendingInteractive | null> {
   const [lastMessage] = await db
     .select({
       role: tutorMessages.role,
@@ -96,36 +136,62 @@ async function getPendingFunContent(conversationId: string) {
     .where(eq(tutorMessages.conversationId, conversationId))
     .orderBy(desc(tutorMessages.createdAt))
     .limit(1);
-  if (
-    !lastMessage ||
-    lastMessage.role !== "agent" ||
-    !lastMessage.sourceId ||
-    (lastMessage.sourceType !== "fun_content" && lastMessage.sourceType !== "reveal_offer")
-  ) {
-    return null;
+  if (!lastMessage || lastMessage.role !== "agent" || !lastMessage.sourceId) return null;
+
+  if (lastMessage.sourceType === "fun_content" || lastMessage.sourceType === "reveal_offer") {
+    const item = await getFunContentById(lastMessage.sourceId);
+    if (!item || !item.answerText) return null;
+    return { kind: "fun_content", item, offeredReveal: lastMessage.sourceType === "reveal_offer" };
   }
-  const item = await getFunContentById(lastMessage.sourceId);
-  if (!item || !item.answerText) return null;
-  return { ...item, offeredReveal: lastMessage.sourceType === "reveal_offer" };
+  if (lastMessage.sourceType === "quiz_question" || lastMessage.sourceType === "quiz_reveal_offer") {
+    const item = await getQuizQuestionById(lastMessage.sourceId);
+    if (!item) return null;
+    return { kind: "quiz_question", item, offeredReveal: lastMessage.sourceType === "quiz_reveal_offer" };
+  }
+  return null;
 }
 
-// Which riddle/joke/puzzle/trivia question is the child asking about when
-// they say "what's the answer" or "give me a hint"? Deliberately more
-// lenient than getPendingFunContent above: this searches the WHOLE
-// conversation history for the most recent fun_content item actually
-// served, not just the very last message - a reveal or hint request
-// still needs to resolve correctly even after other turns (an incorrect
-// guess's own feedback, a previous hint) have happened since the
-// question was first asked. Returns null if nothing fun_content has been
-// sent yet in this conversation.
-async function findMostRecentFunContentItem(conversationId: string) {
-  const [lastFunMessage] = await db
-    .select({ sourceId: tutorMessages.matchedSourceId })
+// Which riddle/joke/puzzle/trivia item OR real practice question is the
+// child asking about when they say "what's the answer" or "give me a
+// hint"? Deliberately more lenient than getPendingInteractive above:
+// this searches the WHOLE conversation history for the most recent
+// fun_content or quiz_question item actually served, not just the very
+// last message - a reveal or hint request still needs to resolve
+// correctly even after other turns (an incorrect guess's own feedback, a
+// previous hint) have happened since the question was first asked.
+// Returns null if nothing has been served yet in this conversation.
+async function findMostRecentInteractiveItem(conversationId: string): Promise<PendingInteractive | null> {
+  const [lastItemMessage] = await db
+    .select({ sourceType: tutorMessages.matchedSourceType, sourceId: tutorMessages.matchedSourceId })
     .from(tutorMessages)
-    .where(and(eq(tutorMessages.conversationId, conversationId), eq(tutorMessages.matchedSourceType, "fun_content")))
+    .where(
+      and(
+        eq(tutorMessages.conversationId, conversationId),
+        inArray(tutorMessages.matchedSourceType, ["fun_content", "quiz_question"])
+      )
+    )
     .orderBy(desc(tutorMessages.createdAt))
     .limit(1);
-  return lastFunMessage?.sourceId ? await getFunContentById(lastFunMessage.sourceId) : null;
+  if (!lastItemMessage?.sourceId) return null;
+  if (lastItemMessage.sourceType === "fun_content") {
+    const item = await getFunContentById(lastItemMessage.sourceId);
+    return item ? { kind: "fun_content", item, offeredReveal: false } : null;
+  }
+  const item = await getQuizQuestionById(lastItemMessage.sourceId);
+  return item ? { kind: "quiz_question", item, offeredReveal: false } : null;
+}
+
+// Every real question already served as 'quiz_question' so far in this
+// conversation - passed to pickQuizQuestion as excludeIds so one sitting
+// doesn't repeat the same question over and over (tutorQuizGame.ts's own
+// doc comment on why an exhausted pool still falls back to a repeat
+// rather than a dead end).
+async function getAskedQuizQuestionIds(conversationId: string): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ sourceId: tutorMessages.matchedSourceId })
+    .from(tutorMessages)
+    .where(and(eq(tutorMessages.conversationId, conversationId), eq(tutorMessages.matchedSourceType, "quiz_question")));
+  return rows.map((r) => r.sourceId).filter((id): id is string => Boolean(id));
 }
 
 export async function tutorRoutes(app: FastifyInstance) {
@@ -298,13 +364,25 @@ export async function tutorRoutes(app: FastifyInstance) {
       // mid-explanation should get one, not the academic honest-fallback
       // reply. See tutorIntent.ts.
       {
-        const pendingItem = await getPendingFunContent(conversation.id);
-        const intent = await classifyTutorIntent(
-          message,
-          pendingItem
-            ? { promptText: pendingItem.promptText, answerText: pendingItem.answerText!, offeredReveal: pendingItem.offeredReveal }
-            : undefined
-        );
+        const pending = await getPendingInteractive(conversation.id);
+        // classifyTutorIntent only needs a generic {promptText,
+        // answerText, offeredReveal} shape to judge reveal/hint/guess
+        // intent - it doesn't need to know or care which of the two
+        // sources (fun_content vs a real quiz question) is pending. The
+        // ACTUAL correctness of a quiz-question guess is never trusted
+        // from here though - see the answer_attempt handling below,
+        // which always re-checks a quiz question deterministically via
+        // checkQuizAnswer instead of intent.correct.
+        const pendingContext =
+          pending &&
+          (pending.kind === "fun_content"
+            ? { promptText: pending.item.promptText, answerText: pending.item.answerText!, offeredReveal: pending.offeredReveal }
+            : {
+                promptText: pending.item.questionText,
+                answerText: pending.item.options.find((o) => o.id === pending.item.correctOptionId)?.text ?? "",
+                offeredReveal: pending.offeredReveal,
+              });
+        const intent = await classifyTutorIntent(message, pendingContext || undefined);
 
         if (intent.kind === "greeting" || intent.kind === "thanks") {
           const replyText = pickRandom(intent.kind === "greeting" ? GREETING_REPLIES : THANKS_REPLIES);
@@ -332,25 +410,57 @@ export async function tutorRoutes(app: FastifyInstance) {
           return reply.send({ mode: "template", reply: replyText });
         }
 
-        if (intent.kind === "reveal_answer") {
-          // formatFunContentReply deliberately withholds the answer up
-          // front (see its own doc comment), so "what's the answer"/"I
-          // give up" needs to look back at whichever riddle/joke/puzzle/
-          // trivia question was sent last to know which answer to give -
-          // findMostRecentFunContentItem below does that lookup.
-          const item = await findMostRecentFunContentItem(conversation.id);
-          const replyText = item
-            ? formatFunContentAnswer(item)
-            : "I haven't asked you a riddle, joke, or puzzle yet this chat - want one? Just ask!";
+        // The real-question chat quiz game (tutorQuizGame.ts) - picks one
+        // real question scoped to THIS conversation's own classId/
+        // subjectId (confirmed with the user as the right scope, rather
+        // than a new subject-picker inside chat), entirely Gemini-free.
+        // Deliberately a separate practice mode: nothing here ever writes
+        // to quiz_attempts, so playing it has no effect on real stars,
+        // quest-map progress, or the leaderboard - answering is purely
+        // for fun/practice, same spirit as a riddle.
+        if (intent.kind === "quiz_game_request") {
+          const askedIds = await getAskedQuizQuestionIds(conversation.id);
+          const picked = await pickQuizQuestion({
+            classId: conversation.classId,
+            subjectId: conversation.subjectId,
+            excludeIds: askedIds,
+          });
+          const replyText = picked
+            ? formatQuizQuestionReply(picked.question, { exhausted: picked.exhausted })
+            : "I don't have any practice questions saved yet for this class and subject - ask a grown-up to add some to Puzzle Kingdom!";
           await recordSimpleTutorExchange({
             conversationId: conversation.id,
             studentMessage: message,
             replyText,
-            // Always 'social', never 'fun_content' - revealing an answer
-            // closes the pending-question window (getPendingFunContent
-            // above only looks at the very last message), so the child's
-            // next message is classified fresh rather than re-checked as
-            // another guess at a question they've already been told.
+            sourceType: picked ? "quiz_question" : "social",
+            sourceId: picked?.question.id,
+          });
+          return reply.send({ mode: "template", reply: replyText });
+        }
+
+        if (intent.kind === "reveal_answer") {
+          // formatFunContentReply/formatQuizQuestionReply both
+          // deliberately withhold the answer up front, so "what's the
+          // answer"/"I give up" needs to look back at whichever item was
+          // sent last to know which answer to give -
+          // findMostRecentInteractiveItem below does that lookup across
+          // both sources.
+          const item = await findMostRecentInteractiveItem(conversation.id);
+          const replyText = !item
+            ? "I haven't asked you a riddle, joke, puzzle, or practice question yet this chat - want one? Just ask!"
+            : item.kind === "fun_content"
+              ? formatFunContentAnswer(item.item)
+              : formatQuizAnswerReveal(item.item);
+          await recordSimpleTutorExchange({
+            conversationId: conversation.id,
+            studentMessage: message,
+            replyText,
+            // Always 'social', never 'fun_content'/'quiz_question' -
+            // revealing an answer closes the pending-question window
+            // (getPendingInteractive above only looks at the very last
+            // message), so the child's next message is classified fresh
+            // rather than re-checked as another guess at a question
+            // they've already been told.
             sourceType: "social",
           });
           return reply.send({ mode: "template", reply: replyText });
@@ -360,34 +470,60 @@ export async function tutorRoutes(app: FastifyInstance) {
           // Same lookup as reveal_answer above - a hint is about the same
           // "which question are they asking about" question, it just gets
           // formatted as a nudge instead of the full answer (see
-          // formatFunContentHint's own doc comment for why these are kept
-          // separate replies rather than collapsing hint_request into
-          // reveal_answer).
-          const item = await findMostRecentFunContentItem(conversation.id);
-          const replyText = item
-            ? formatFunContentHint(item)
-            : "I haven't asked you a riddle, joke, or puzzle yet this chat - want one? Just ask!";
+          // formatFunContentHint/formatQuizHint's own doc comments for
+          // why these are kept separate replies rather than collapsing
+          // hint_request into reveal_answer).
+          const item = await findMostRecentInteractiveItem(conversation.id);
+          const replyText = !item
+            ? "I haven't asked you a riddle, joke, puzzle, or practice question yet this chat - want one? Just ask!"
+            : item.kind === "fun_content"
+              ? formatFunContentHint(item.item)
+              : formatQuizHint(item.item);
           await recordSimpleTutorExchange({
             conversationId: conversation.id,
             studentMessage: message,
             replyText,
             // Unlike reveal_answer, a hint should NOT close the pending
             // window - the child is still expected to guess again, so
-            // this reopens (or keeps open) the same 'fun_content' pending
-            // state as the original question (offeredReveal: false, since
-            // a hint isn't the "want a hint, or the answer?" offer
-            // itself). Falls back to 'social' when there was nothing to
-            // hint at in the first place.
-            sourceType: item ? "fun_content" : "social",
-            sourceId: item?.id,
+            // this reopens (or keeps open) the same pending state as the
+            // original question (offeredReveal: false, since a hint
+            // isn't the "want a hint, or the answer?" offer itself).
+            // Falls back to 'social' when there was nothing to hint at in
+            // the first place.
+            sourceType: !item ? "social" : item.kind === "fun_content" ? "fun_content" : "quiz_question",
+            sourceId: item?.item.id,
           });
           return reply.send({ mode: "template", reply: replyText });
         }
 
         if (intent.kind === "answer_attempt") {
-          // pendingItem is guaranteed set here - classifyTutorIntent only
+          // pending is guaranteed set here - classifyTutorIntent only
           // ever returns answer_attempt when it was given pending context
           // to judge against in the first place (see tutorIntent.ts).
+          if (pending!.kind === "quiz_question") {
+            // A real curriculum question has one objectively right
+            // answer, so this is checked deterministically via
+            // checkQuizAnswer (tutorQuizGame.ts) - intent.correct (an
+            // LLM's generous, wording-tolerant judgement, exactly right
+            // for a riddle's fuzzy phrasing) is never trusted here. This
+            // matters doubly with GEMINI_API_KEY currently unavailable:
+            // this whole path stays correct and Gemini-free either way.
+            const correct = checkQuizAnswer(message, pending!.item);
+            const base = pickRandom(correct ? QUIZ_CORRECT_REPLIES : QUIZ_INCORRECT_REPLIES);
+            // On a correct guess, reinforce the learning with the
+            // question's own explanation - the same content Results
+            // already shows, not just a bare "correct!".
+            const replyText = correct ? `${base}\n\n${pending!.item.explanation}` : base;
+            await recordSimpleTutorExchange({
+              conversationId: conversation.id,
+              studentMessage: message,
+              replyText,
+              sourceType: correct ? "social" : "quiz_reveal_offer",
+              sourceId: correct ? undefined : pending!.item.id,
+            });
+            return reply.send({ mode: "template", reply: replyText });
+          }
+
           const replyText = pickRandom(intent.correct ? CORRECT_GUESS_REPLIES : INCORRECT_GUESS_REPLIES);
           await recordSimpleTutorExchange({
             conversationId: conversation.id,
@@ -397,11 +533,11 @@ export async function tutorRoutes(app: FastifyInstance) {
             // nothing left to guess or reveal. An incorrect guess instead
             // reopens it as 'reveal_offer': INCORRECT_GUESS_REPLIES just
             // asked "want a hint, or should I tell you the answer?", so
-            // getPendingFunContent above needs to recognize a short "yes"
-            // next turn as accepting that offer (tutorIntent.ts's
+            // getPendingInteractive above needs to recognize a short
+            // "yes" next turn as accepting that offer (tutorIntent.ts's
             // offeredReveal handling) rather than as a fresh guess.
             sourceType: intent.correct ? "social" : "reveal_offer",
-            sourceId: intent.correct ? undefined : pendingItem!.id,
+            sourceId: intent.correct ? undefined : pending!.item.id,
           });
           return reply.send({ mode: "template", reply: replyText });
         }

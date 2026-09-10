@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, BookOpenText, Bird, Dices, Laugh, Lightbulb, Puzzle as PuzzleIcon, Send } from "lucide-react";
+import { ArrowLeft, BookOpenText, Bird, Dices, GraduationCap, Laugh, Lightbulb, Puzzle as PuzzleIcon, Send } from "lucide-react";
 import { getClassSubjects, getTutorConversation, sendTutorMessage, startTutorConversation } from "../api";
 import type { PkClass, Subject, TutorConversation, TutorMessage, TutorMessageMode, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
@@ -234,6 +234,10 @@ export function StudyBuddy({
           <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
             {[
               { label: "Play a game", icon: Dices, text: "Can we play a game?" },
+              // Real curriculum questions from this chat's own class/
+              // subject (tutorQuizGame.ts) - distinct from the riddle/
+              // joke/trivia chips below, which stay general fun content.
+              { label: "Quiz me!", icon: GraduationCap, text: "Give me a real practice question from my lessons!" },
               { label: "Riddle", icon: PuzzleIcon, text: "Give me a riddle!" },
               { label: "Joke", icon: Laugh, text: "Tell me a joke!" },
               { label: "Tongue twister", icon: BookOpenText, text: "Give me a tongue twister!" },

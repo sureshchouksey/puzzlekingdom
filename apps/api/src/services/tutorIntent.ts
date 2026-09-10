@@ -35,6 +35,14 @@ export type TutorIntent =
   | { kind: "greeting" }
   | { kind: "thanks" }
   | { kind: "fun_request"; contentType: FunContentType; subject?: "science" | "english" | "maths" }
+  // The child wants to practice REAL questions from their own
+  // class's lessons/quiz papers - not a riddle, joke, or general
+  // trivia fact, but an actual curriculum question (the `questions`
+  // bank, same one the formal Quiz screen uses) they can be marked
+  // right or wrong on. See tutorQuizGame.ts - tutor.ts picks one
+  // scoped to the conversation's own class/subject, entirely
+  // Gemini-free, same spirit as tutorArithmetic.ts.
+  | { kind: "quiz_game_request" }
   // The child is asking to be told the answer to whatever riddle/joke/
   // puzzle/trivia question was most recently sent - see funContent.ts's
   // formatFunContentReply, which deliberately withholds the answer from
@@ -63,7 +71,7 @@ const FUN_CONTENT_TYPES = ["tongue_twister", "riddle", "joke", "puzzle", "trivia
 const TRIVIA_SUBJECTS = ["science", "english", "maths"] as const;
 
 const intentResultSchema = z.object({
-  intent: z.enum(["greeting", "thanks", "fun_request", "reveal_answer", "hint_request", "answer_attempt", "academic_or_other"]),
+  intent: z.enum(["greeting", "thanks", "fun_request", "quiz_game_request", "reveal_answer", "hint_request", "answer_attempt", "academic_or_other"]),
   funContentType: z.enum(FUN_CONTENT_TYPES).optional(),
   subject: z.enum(TRIVIA_SUBJECTS).optional(),
   correct: z.boolean().optional(),
@@ -74,11 +82,25 @@ const INTENT_JSON_SCHEMA = {
   properties: {
     intent: {
       type: "string",
-      enum: ["greeting", "thanks", "fun_request", "reveal_answer", "hint_request", "answer_attempt", "academic_or_other"],
+      enum: [
+        "greeting",
+        "thanks",
+        "fun_request",
+        "quiz_game_request",
+        "reveal_answer",
+        "hint_request",
+        "answer_attempt",
+        "academic_or_other",
+      ],
       description:
         "greeting = hello/hi/hey and similar. thanks = thank you or appreciation. fun_request = the child " +
         "wants to play, or asked for a riddle, joke, tongue twister, puzzle/brain-teaser, or a trivia " +
-        "question. reveal_answer = the child is asking to be told the answer outright - giving up, asking " +
+        "question (general knowledge, NOT their own schoolwork). quiz_game_request = the child wants to " +
+        "practice REAL questions from their own class's lessons/quiz papers - e.g. 'quiz me on my real " +
+        "lessons', 'give me a practice question', 'ask me a question from my papers', 'let's play the " +
+        "lesson quiz game', 'test me on what I've been learning' - use this only when they clearly mean " +
+        "actual curriculum content, not a general trivia fact (that's fun_request instead). " +
+        "reveal_answer = the child is asking to be told the answer outright - giving up, asking " +
         "outright for the answer, saying they don't know (NOT a guess at the answer itself, and NOT a " +
         "request for just a hint). hint_request = the child wants a nudge or clue toward the answer, " +
         "short of being told it outright - e.g. 'give me a hint', 'I want a hint', 'can I have a clue'. " +
@@ -184,6 +206,13 @@ const RIDDLE_PATTERN = /\briddles?\b/i;
 const JOKE_PATTERN = /\bjokes?\b|\bfunny\b/i;
 const TWISTER_PATTERN = /\btongue\s?twisters?\b|\btwisters?\b/i;
 const PUZZLE_PATTERN = /\bpuzzles?\b|\bbrain\s?teasers?\b/i;
+// The real-question chat quiz game (tutorQuizGame.ts) - deliberately
+// distinct wording from TRIVIA_PATTERN below ('quiz me'/'test me' bare
+// stays mapped to general fun-content trivia, an already-shipped and
+// working behaviour this must not regress) - requires a clear signal
+// that the child means their OWN lessons/papers, not a general fact.
+const QUIZ_GAME_PATTERN =
+  /\breal questions?\b|\bpractice questions?\b|\bpractice quiz\b|\blesson quiz\b|\bquiz game\b|\bfrom my (lessons?|papers?|quiz)\b|\btest me on my (lessons?|work)\b/i;
 // "trivia"/"quiz me"/"test me" as bare triggers, or an explicit request
 // verb ("ask me"/"give me") plus a subject - deliberately NOT a bare
 // "<subject> question" match (e.g. just "science question" anywhere in
@@ -246,6 +275,7 @@ export function heuristicClassifyTutorIntent(message: string, pending?: PendingF
   if (JOKE_PATTERN.test(text)) return { kind: "fun_request", contentType: "joke" };
   if (TWISTER_PATTERN.test(text)) return { kind: "fun_request", contentType: "tongue_twister" };
   if (PUZZLE_PATTERN.test(text)) return { kind: "fun_request", contentType: "puzzle" };
+  if (QUIZ_GAME_PATTERN.test(text)) return { kind: "quiz_game_request" };
   if (TRIVIA_PATTERN.test(text)) {
     const subject = /science/i.test(text) ? "science" : /english/i.test(text) ? "english" : /maths?/i.test(text) ? "maths" : "science";
     return { kind: "fun_request", contentType: "trivia", subject };
@@ -300,6 +330,7 @@ export async function classifyTutorIntent(message: string, pending?: PendingFunC
       if (parsed.intent === "thanks") return { kind: "thanks" };
       if (parsed.intent === "reveal_answer") return { kind: "reveal_answer" };
       if (parsed.intent === "hint_request") return { kind: "hint_request" };
+      if (parsed.intent === "quiz_game_request") return { kind: "quiz_game_request" };
       if (parsed.intent === "answer_attempt") return { kind: "answer_attempt", correct: parsed.correct ?? false };
       if (parsed.intent === "fun_request" && parsed.funContentType) {
         return {

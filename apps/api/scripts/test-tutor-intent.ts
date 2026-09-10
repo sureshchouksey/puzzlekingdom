@@ -251,6 +251,25 @@ const CASES: TestCase[] = [
     note: "offeredReveal is false here (this is the original question, not the post-wrong-guess offer) - AFFIRMATIVE_PATTERN must stay gated on offeredReveal, not fire on any pending question",
   },
 
+  // --- Real-question quiz game requests (added 10 September 2026 - the
+  // chat-based real-question quiz game, tutorQuizGame.ts) ---
+  {
+    label: "quiz game: exact chip phrase",
+    message: "Give me a real practice question from my lessons!",
+    expectedKind: "quiz_game_request",
+  },
+  { label: "quiz game: practice question", message: "can I have a practice question?", expectedKind: "quiz_game_request" },
+  { label: "quiz game: lesson quiz", message: "let's do a lesson quiz", expectedKind: "quiz_game_request" },
+  { label: "quiz game: quiz game bare phrase", message: "can we play the quiz game", expectedKind: "quiz_game_request" },
+  { label: "quiz game: test me on my lessons", message: "test me on my lessons", expectedKind: "quiz_game_request" },
+  {
+    label: "NOT a quiz-game request - bare 'quiz me' stays general trivia (must not regress)",
+    message: "quiz me",
+    expectedKind: "fun_request",
+    expectedContentType: "trivia",
+    note: "bare quiz me/test me is established, shipped behaviour (general trivia fun_content) - the new quiz_game_request intent must only fire on a clear 'my own lessons/papers/practice' signal, never on this alone",
+  },
+
   // --- Academic (no pending) ---
   { label: "academic: arithmetic", message: "what is 234-67", expectedKind: "academic" },
   { label: "academic: explain a topic", message: "can you explain fractions to me", expectedKind: "academic" },
