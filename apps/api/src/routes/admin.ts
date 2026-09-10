@@ -26,19 +26,118 @@ const settingsWriteSchema = z.object({
   tutorSharedDailyBudget: z.number().int().positive().nullable().optional(),
 });
 
+// The 8 question types from Question-Types-and-Content-Authoring-Plan.md's
+// "Data model recommendation" - mcq/true_false keep using the existing
+// options/correctOptionId columns (true_false is just mcq's shape fixed to
+// two options, rendered as a toggle on the frontend); everything else
+// stores its answer shape in answerPayload instead and leaves
+// options/correctOptionId empty (see lib/scoring.ts's GradableQuestion for
+// exactly what each type's answerPayload holds).
+const QUESTION_TYPES = [
+  "mcq",
+  "true_false",
+  "fill_blank",
+  "missing_number",
+  "missing_spelling",
+  "match_column",
+  "short_answer",
+  "long_answer",
+] as const;
+
 // Body shape for creating/editing one question by hand from the admin
 // dashboard - looser than generatedQuestionSchema (every field optional
 // except documentId on create) since an edit only sends the fields that
-// changed, not the whole question every time.
+// changed, not the whole question every time. options/correctOptionId
+// are validated more strictly (per questionType) in
+// validateQuestionShape below, not here - this schema just checks the
+// wire shape, not the business rules for a given type.
 const questionWriteSchema = z.object({
   documentId: z.string().uuid().optional(),
+  questionType: z.enum(QUESTION_TYPES).optional(),
   questionText: z.string().min(1).optional(),
-  options: z.array(generatedOptionSchema).min(3).max(6).optional(),
-  correctOptionId: z.string().min(1).optional(),
+  options: z.array(generatedOptionSchema).max(6).optional(),
+  correctOptionId: z.string().optional(),
+  // Per-type shape (acceptedAnswers / left+right+correctPairs /
+  // rubricKeyPoints) - validated in validateQuestionShape, not here,
+  // since the required keys depend on questionType.
+  answerPayload: z.record(z.unknown()).nullable().optional(),
+  // Non-Verbal Reasoning (Phase 2) will be the first real user of this,
+  // but it's accepted for any type now that the column exists (migration
+  // 0017) - no reason to gate it to one question type.
+  imageUrl: z.string().min(1).optional(),
   explanation: z.string().min(1).optional(),
   topics: z.array(z.string().min(1)).optional(),
   tip: z.string().min(1).optional(),
 });
+
+type QuestionType = (typeof QUESTION_TYPES)[number];
+type QuestionOption = { id: string; text: string };
+
+// Validates + normalizes one question's type-specific shape, shared by
+// POST and PATCH so the per-type rules only live in one place. Returns
+// the final options/correctOptionId/answerPayload to persist (non-mcq
+// types always persist an empty options array + empty correctOptionId,
+// since those DB columns are NOT NULL but semantically unused once
+// answerPayload is what scoring.ts actually reads) or an error string.
+function validateQuestionShape(
+  questionType: QuestionType,
+  options: QuestionOption[],
+  correctOptionId: string,
+  answerPayload: Record<string, unknown> | null
+):
+  | { ok: true; options: QuestionOption[]; correctOptionId: string; answerPayload: Record<string, unknown> | null }
+  | { ok: false; error: string } {
+  switch (questionType) {
+    case "mcq": {
+      if (options.length < 3) return { ok: false, error: "An MCQ question needs at least 3 options" };
+      if (!correctOptionId || !options.some((o) => o.id === correctOptionId)) {
+        return { ok: false, error: "correctOptionId must match the id of one of the options" };
+      }
+      return { ok: true, options, correctOptionId, answerPayload: null };
+    }
+    case "true_false": {
+      if (options.length !== 2) return { ok: false, error: "A True/False question needs exactly 2 options" };
+      if (!correctOptionId || !options.some((o) => o.id === correctOptionId)) {
+        return { ok: false, error: "correctOptionId must match the id of one of the options" };
+      }
+      return { ok: true, options, correctOptionId, answerPayload: null };
+    }
+    case "fill_blank":
+    case "missing_number":
+    case "missing_spelling": {
+      const accepted = answerPayload?.acceptedAnswers;
+      if (!Array.isArray(accepted) || accepted.length === 0 || !accepted.every((a) => typeof a === "string" && a.trim().length > 0)) {
+        return { ok: false, error: "At least one accepted answer is required" };
+      }
+      return { ok: true, options: [], correctOptionId: "", answerPayload: { acceptedAnswers: accepted } };
+    }
+    case "match_column": {
+      const left = answerPayload?.left;
+      const right = answerPayload?.right;
+      const correctPairs = answerPayload?.correctPairs;
+      const validList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string" && x.trim().length > 0);
+      if (!validList(left) || !validList(right) || left.length !== right.length || left.length < 2) {
+        return { ok: false, error: "Match the column needs at least 2 pairs, with both sides filled in" };
+      }
+      if (
+        !Array.isArray(correctPairs) ||
+        correctPairs.length !== left.length ||
+        !correctPairs.every((p) => Array.isArray(p) && p.length === 2 && typeof p[0] === "number" && typeof p[1] === "number")
+      ) {
+        return { ok: false, error: "correctPairs must have one [leftIndex, rightIndex] entry per pair" };
+      }
+      return { ok: true, options: [], correctOptionId: "", answerPayload: { left, right, correctPairs } };
+    }
+    case "short_answer":
+    case "long_answer": {
+      const rubric = answerPayload?.rubricKeyPoints;
+      if (!Array.isArray(rubric) || rubric.length === 0 || !rubric.every((a) => typeof a === "string" && a.trim().length > 0)) {
+        return { ok: false, error: "At least one rubric key point (used as the model answer) is required" };
+      }
+      return { ok: true, options: [], correctOptionId: "", answerPayload: { rubricKeyPoints: rubric } };
+    }
+  }
+}
 
 // Body shape for creating/editing a subject from the admin dashboard.
 // Subjects are flat and reusable across classes (see subjects.ts) - just
@@ -111,6 +210,9 @@ export async function adminRoutes(app: FastifyInstance) {
           questionText: questions.questionText,
           options: questions.options,
           correctOptionId: questions.correctOptionId,
+          questionType: questions.questionType,
+          answerPayload: questions.answerPayload,
+          imageUrl: questions.imageUrl,
           explanation: questions.explanation,
           topics: questions.topics,
           tip: questions.tip,
@@ -140,14 +242,13 @@ export async function adminRoutes(app: FastifyInstance) {
     const body = parsed.data;
 
     if (!body.documentId) return reply.status(400).send({ error: "documentId is required" });
-    if (!body.questionText || !body.options || !body.correctOptionId || !body.explanation) {
-      return reply.status(400).send({
-        error: "questionText, options, correctOptionId, and explanation are all required to create a question",
-      });
+    if (!body.questionText || !body.explanation) {
+      return reply.status(400).send({ error: "questionText and explanation are both required to create a question" });
     }
-    if (!body.options.some((o) => o.id === body.correctOptionId)) {
-      return reply.status(400).send({ error: "correctOptionId must match the id of one of the options" });
-    }
+
+    const questionType = body.questionType ?? "mcq";
+    const shape = validateQuestionShape(questionType, body.options ?? [], body.correctOptionId ?? "", body.answerPayload ?? null);
+    if (!shape.ok) return reply.status(400).send({ error: shape.error });
 
     const [doc] = await db.select().from(documents).where(eq(documents.id, body.documentId)).limit(1);
     if (!doc) return reply.status(404).send({ error: "Document not found" });
@@ -158,8 +259,11 @@ export async function adminRoutes(app: FastifyInstance) {
         documentId: doc.id,
         subjectId: doc.subjectId,
         questionText: body.questionText,
-        options: body.options,
-        correctOptionId: body.correctOptionId,
+        questionType,
+        options: shape.options,
+        correctOptionId: shape.correctOptionId,
+        answerPayload: shape.answerPayload,
+        imageUrl: body.imageUrl,
         explanation: body.explanation,
         topics: body.topics,
         tip: body.tip,
@@ -177,18 +281,28 @@ export async function adminRoutes(app: FastifyInstance) {
     const [existing] = await db.select().from(questions).where(eq(questions.id, request.params.id)).limit(1);
     if (!existing) return reply.status(404).send({ error: "Question not found" });
 
-    const nextOptions = body.options ?? existing.options;
-    const nextCorrectOptionId = body.correctOptionId ?? existing.correctOptionId;
-    if (!nextOptions.some((o) => o.id === nextCorrectOptionId)) {
-      return reply.status(400).send({ error: "correctOptionId must match the id of one of the options" });
-    }
+    const nextType = body.questionType ?? existing.questionType;
+    // A type change means the old options/answerPayload belong to the old
+    // shape and shouldn't be reused as a fallback - the caller must send
+    // the new type's fields together (the admin form always does this,
+    // since switching the type picker resets the type-specific fields).
+    const typeChanged = body.questionType !== undefined && body.questionType !== existing.questionType;
+    const nextOptions = body.options ?? (typeChanged ? [] : existing.options);
+    const nextCorrectOptionId = body.correctOptionId ?? (typeChanged ? "" : existing.correctOptionId);
+    const nextAnswerPayload = body.answerPayload !== undefined ? body.answerPayload : typeChanged ? null : existing.answerPayload;
+
+    const shape = validateQuestionShape(nextType, nextOptions, nextCorrectOptionId, nextAnswerPayload);
+    if (!shape.ok) return reply.status(400).send({ error: shape.error });
 
     const [updated] = await db
       .update(questions)
       .set({
         questionText: body.questionText ?? existing.questionText,
-        options: nextOptions,
-        correctOptionId: nextCorrectOptionId,
+        questionType: nextType,
+        options: shape.options,
+        correctOptionId: shape.correctOptionId,
+        answerPayload: shape.answerPayload,
+        imageUrl: body.imageUrl ?? existing.imageUrl,
         explanation: body.explanation ?? existing.explanation,
         topics: body.topics ?? existing.topics,
         tip: body.tip ?? existing.tip,

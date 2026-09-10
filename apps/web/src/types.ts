@@ -277,14 +277,45 @@ export type AdminLoginResponse = {
   token: string;
 };
 
+// The 8 question types from Question-Types-and-Content-Authoring-Plan.md.
+// mcq/true_false keep using options/correctOptionId; every other type
+// stores its answer shape in answerPayload instead - see AnswerPayload
+// below for exactly what each type holds there.
+export type QuestionType =
+  | "mcq"
+  | "true_false"
+  | "fill_blank"
+  | "missing_number"
+  | "missing_spelling"
+  | "match_column"
+  | "short_answer"
+  | "long_answer";
+
+// The answerPayload shapes lib/scoring.ts (apps/api) grades against -
+// kept as one loose union here rather than importing from the API, since
+// the two apps don't share a package yet (see types.ts's own header
+// comment). Optional fields throughout since a row not yet saved (a
+// fresh admin draft) or an mcq/true_false row (answerPayload is null)
+// won't have any of these set.
+export type AnswerPayload = {
+  acceptedAnswers?: string[];
+  left?: string[];
+  right?: string[];
+  correctPairs?: [number, number][];
+  rubricKeyPoints?: string[];
+};
+
 // One question row as shown in the admin dashboard's question list -
 // AdminQuestion carries the same fields plus subject/class context and
 // timestamps, since it's read from a joined query.
 export type AdminQuestion = {
   id: string;
   questionText: string;
+  questionType: QuestionType;
   options: QuizOption[];
   correctOptionId: string;
+  answerPayload: AnswerPayload | null;
+  imageUrl: string | null;
   explanation: string;
   topics: string[] | null;
   tip: string | null;
@@ -304,12 +335,41 @@ export type AdminQuestionsResponse = {
 // edit only sends the fields that changed.
 export type AdminQuestionWriteInput = {
   documentId?: string;
+  questionType?: QuestionType;
   questionText?: string;
   options?: QuizOption[];
   correctOptionId?: string;
+  answerPayload?: AnswerPayload | null;
+  imageUrl?: string;
   explanation?: string;
   topics?: string[];
   tip?: string;
+};
+
+// One topic row (schema.ts's topics table) - class+subject scoped,
+// ordered, with a difficulty tag. Managed from the admin dashboard's
+// Topics tab; consumed by the quest map (via /reports/topics) for its
+// node sequence and difficulty labels.
+export type TopicDifficulty = "beginner" | "medium" | "hard";
+
+export type AdminTopic = {
+  id: string;
+  classId: string;
+  subjectId: string;
+  name: string;
+  displayOrder: number;
+  difficulty: TopicDifficulty;
+  createdAt: string;
+  className: string;
+  subjectName: string;
+};
+
+export type AdminTopicWriteInput = {
+  classId?: string;
+  subjectId?: string;
+  name?: string;
+  displayOrder?: number;
+  difficulty?: TopicDifficulty;
 };
 
 // One row of the admin "Users" roster - every profile with aggregate

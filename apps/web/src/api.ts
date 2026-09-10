@@ -3,6 +3,8 @@ import type {
   AdminQuestion,
   AdminQuestionsResponse,
   AdminQuestionWriteInput,
+  AdminTopic,
+  AdminTopicWriteInput,
   AdminUserSummary,
   AiProvider,
   AssembleQuizResponse,
@@ -340,6 +342,49 @@ export async function deleteAdminQuestion(id: string): Promise<void> {
 
 export function getAdminUsers(): Promise<AdminUserSummary[]> {
   return apiFetch(`/admin/users`).then((res) => asJson(res));
+}
+
+// Topics (schema.ts's topics table) - class+subject scoped, ordered, with
+// a difficulty tag. Admin-only CRUD; consumed elsewhere by /reports/topics
+// for the quest map's node sequence.
+export function getAdminTopics(params: { classId?: string; subjectId?: string } = {}): Promise<AdminTopic[]> {
+  return apiFetch(`/admin/topics${buildQuery(params)}`).then((res) => asJson(res));
+}
+
+export function createAdminTopic(input: AdminTopicWriteInput): Promise<AdminTopic> {
+  return apiFetch(`/admin/topics`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }).then((res) => asJson(res));
+}
+
+export function updateAdminTopic(id: string, input: AdminTopicWriteInput): Promise<AdminTopic> {
+  return apiFetch(`/admin/topics/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }).then((res) => asJson(res));
+}
+
+export async function deleteAdminTopic(id: string): Promise<void> {
+  const res = await apiFetch(`/admin/topics/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const message = typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : res.statusText;
+    throw new Error(message);
+  }
+}
+
+// Subjects are flat and shared across classes - GET reuses the existing
+// public /subjects list (no admin gate needed just to read them); only
+// creating a new one is admin-only.
+export function createAdminSubject(name: string): Promise<Subject> {
+  return apiFetch(`/admin/subjects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  }).then((res) => asJson(res));
 }
 
 // Forgot-PIN recovery - clears a profile's PIN so it's prompted to choose

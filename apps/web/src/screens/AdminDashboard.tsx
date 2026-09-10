@@ -1,11 +1,17 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Bird, FileUp, LogOut, Settings2, Users } from "lucide-react";
+import { Bird, FileUp, LayoutGrid, LogOut, Settings2, Users } from "lucide-react";
 import {
   createAdminQuestion,
+  createAdminSubject,
+  createAdminTopic,
   deleteAdminQuestion,
+  deleteAdminTopic,
   generateTutorInsights,
   getAdminQuestions,
+  getAdminTopics,
   getAdminUsers,
+  getClasses,
+  getSubjects,
   getTutorConversation,
   getTutorConversationsForProfile,
   getTutorInsights,
@@ -13,14 +19,20 @@ import {
   logout,
   resetProfilePin,
   updateAdminQuestion,
+  updateAdminTopic,
   updateTutorSettings,
 } from "../api";
 import type {
   AdminQuestion,
   AdminQuestionWriteInput,
+  AdminTopic,
   AdminUser,
   AdminUserSummary,
+  PkClass,
+  QuestionType,
   QuizOption,
+  Subject,
+  TopicDifficulty,
   TutorConversation,
   TutorInsightsResponse,
   TutorSettings,
@@ -29,7 +41,31 @@ import type {
 import { Button } from "../components/ui/button";
 import { Upload } from "./Upload";
 
-type Tab = "questions" | "users" | "content" | "studyBuddy";
+type Tab = "questions" | "topics" | "users" | "content" | "studyBuddy";
+
+// Labels shown in the type picker and on non-mcq question cards - order
+// here is the order the picker lists them in, matching the plan doc's
+// own ordering (MCQ first since it's the existing/default type).
+const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  mcq: "Multiple choice",
+  true_false: "True / False",
+  fill_blank: "Fill in the blank",
+  missing_number: "Missing number",
+  missing_spelling: "Missing spelling",
+  match_column: "Match the column",
+  short_answer: "Short answer",
+  long_answer: "Long answer",
+};
+const QUESTION_TYPE_ORDER: QuestionType[] = [
+  "mcq",
+  "true_false",
+  "fill_blank",
+  "missing_number",
+  "missing_spelling",
+  "match_column",
+  "short_answer",
+  "long_answer",
+];
 
 const OPTION_LABELS = ["a", "b", "c", "d", "e", "f"] as const;
 
@@ -37,52 +73,187 @@ const inputClass =
   "rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 // Draft shape shared by both the "edit an existing question" and "add a
-// question to an existing document" forms below - options as plain
-// strings keyed by position, correctIndex picks which one is right, so
-// the UI never has to juggle option ids directly.
+// question to an existing document" forms below. options/correctIndex
+// are used for mcq/true_false (options as plain strings keyed by
+// position, correctIndex picks which one is right, so the UI never has
+// to juggle option ids directly); acceptedAnswers/pairs/rubricKeyPoints
+// hold the other 6 types' answerPayload shapes in editable form - see
+// draftToWriteInput for how each maps to what admin.ts's
+// validateQuestionShape actually expects.
 type QuestionDraft = {
+  questionType: QuestionType;
   questionText: string;
   options: string[];
   correctIndex: number;
   explanation: string;
   topics: string;
   tip: string;
+  imageUrl: string;
+  acceptedAnswers: string[];
+  pairs: { left: string; right: string }[];
+  rubricKeyPoints: string[];
 };
 
-function draftFromQuestion(q: AdminQuestion): QuestionDraft {
+function emptyQuestionDraft(questionType: QuestionType = "mcq"): QuestionDraft {
   return {
+    questionType,
+    questionText: "",
+    options: ["", "", "", ""],
+    correctIndex: 0,
+    explanation: "",
+    topics: "",
+    tip: "",
+    imageUrl: "",
+    acceptedAnswers: [""],
+    pairs: [
+      { left: "", right: "" },
+      { left: "", right: "" },
+    ],
+    rubricKeyPoints: [""],
+  };
+}
+
+function draftFromQuestion(q: AdminQuestion): QuestionDraft {
+  const payload = q.answerPayload ?? {};
+  const pairs =
+    payload.left && payload.left.length > 0
+      ? payload.left.map((left, i) => ({ left, right: payload.right?.[i] ?? "" }))
+      : [
+          { left: "", right: "" },
+          { left: "", right: "" },
+        ];
+  return {
+    questionType: q.questionType,
     questionText: q.questionText,
-    options: q.options.map((o) => o.text),
-    correctIndex: Math.max(q.options.findIndex((o) => o.id === q.correctOptionId), 0),
+    options: q.questionType === "mcq" ? q.options.map((o) => o.text) : ["", "", "", ""],
+    correctIndex:
+      q.questionType === "mcq" || q.questionType === "true_false"
+        ? Math.max(q.options.findIndex((o) => o.id === q.correctOptionId), 0)
+        : 0,
     explanation: q.explanation,
     topics: (q.topics ?? []).join(", "),
     tip: q.tip ?? "",
+    imageUrl: q.imageUrl ?? "",
+    acceptedAnswers: payload.acceptedAnswers && payload.acceptedAnswers.length > 0 ? payload.acceptedAnswers : [""],
+    pairs,
+    rubricKeyPoints: payload.rubricKeyPoints && payload.rubricKeyPoints.length > 0 ? payload.rubricKeyPoints : [""],
   };
 }
 
 function draftToWriteInput(d: QuestionDraft, documentId?: string): AdminQuestionWriteInput {
-  const options: QuizOption[] = d.options.map((text, i) => ({ id: OPTION_LABELS[i], text: text.trim() }));
   const topics = d.topics
     .split(",")
     .map((t) => t.trim())
     .filter(Boolean);
-  return {
+  const base = {
     documentId,
+    questionType: d.questionType,
     questionText: d.questionText.trim(),
-    options,
-    correctOptionId: OPTION_LABELS[d.correctIndex],
     explanation: d.explanation.trim(),
     topics: topics.length ? topics : undefined,
     tip: d.tip.trim() || undefined,
+    imageUrl: d.imageUrl.trim() || undefined,
   };
+
+  switch (d.questionType) {
+    case "mcq": {
+      const options: QuizOption[] = d.options.map((text, i) => ({ id: OPTION_LABELS[i], text: text.trim() }));
+      return { ...base, options, correctOptionId: OPTION_LABELS[d.correctIndex], answerPayload: null };
+    }
+    case "true_false": {
+      const options: QuizOption[] = [
+        { id: "true", text: "True" },
+        { id: "false", text: "False" },
+      ];
+      return { ...base, options, correctOptionId: d.correctIndex === 0 ? "true" : "false", answerPayload: null };
+    }
+    case "fill_blank":
+    case "missing_number":
+    case "missing_spelling": {
+      const acceptedAnswers = d.acceptedAnswers.map((a) => a.trim()).filter(Boolean);
+      return { ...base, options: [], correctOptionId: "", answerPayload: { acceptedAnswers } };
+    }
+    case "match_column": {
+      const rows = d.pairs.map((p) => ({ left: p.left.trim(), right: p.right.trim() })).filter((p) => p.left && p.right);
+      return {
+        ...base,
+        options: [],
+        correctOptionId: "",
+        answerPayload: {
+          left: rows.map((r) => r.left),
+          right: rows.map((r) => r.right),
+          correctPairs: rows.map((_, i) => [i, i] as [number, number]),
+        },
+      };
+    }
+    case "short_answer":
+    case "long_answer": {
+      const rubricKeyPoints = d.rubricKeyPoints.map((r) => r.trim()).filter(Boolean);
+      return { ...base, options: [], correctOptionId: "", answerPayload: { rubricKeyPoints } };
+    }
+  }
 }
 
 function draftIsValid(d: QuestionDraft): boolean {
+  if (d.questionText.trim().length === 0 || d.explanation.trim().length === 0) return false;
+  switch (d.questionType) {
+    case "mcq":
+      return d.options.length >= 3 && d.options.every((o) => o.trim().length > 0);
+    case "true_false":
+      return true;
+    case "fill_blank":
+    case "missing_number":
+    case "missing_spelling":
+      return d.acceptedAnswers.some((a) => a.trim().length > 0);
+    case "match_column":
+      return d.pairs.filter((p) => p.left.trim().length > 0 && p.right.trim().length > 0).length >= 2;
+    case "short_answer":
+    case "long_answer":
+      return d.rubricKeyPoints.some((r) => r.trim().length > 0);
+  }
+}
+
+// A reorderable list of plain-text entries - shared by fill-in-blank/
+// missing-number/missing-spelling's "accepted answers" and short/long
+// answer's "model answer key points", the two places a question needs a
+// growable list of strings rather than a fixed shape.
+function StringListEditor({
+  values,
+  onChange,
+  placeholder,
+}: {
+  values: string[];
+  onChange: (next: string[]) => void;
+  placeholder: string;
+}) {
   return (
-    d.questionText.trim().length > 0 &&
-    d.options.length >= 3 &&
-    d.options.every((o) => o.trim().length > 0) &&
-    d.explanation.trim().length > 0
+    <div className="flex flex-col gap-1.5">
+      {values.map((v, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input
+            value={v}
+            onChange={(e) => {
+              const next = [...values];
+              next[i] = e.target.value;
+              onChange(next);
+            }}
+            placeholder={placeholder}
+            className={`${inputClass} flex-1`}
+          />
+          {values.length > 1 && (
+            <button
+              onClick={() => onChange(values.filter((_, idx) => idx !== i))}
+              className="text-sm font-medium text-destructive hover:underline"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      ))}
+      <button onClick={() => onChange([...values, ""])} className="self-start text-sm font-semibold text-primary hover:underline">
+        + Add
+      </button>
+    </div>
   );
 }
 
@@ -99,57 +270,180 @@ function QuestionForm({
   onCancel: () => void;
   saving: boolean;
 }) {
+  // Switching type resets the type-specific fields to a fresh default,
+  // keeping only what's shared across every type (question text,
+  // explanation, topics, tip, image) - the old type's
+  // options/answerPayload wouldn't validate against the new type anyway
+  // (see admin.ts's validateQuestionShape), so there's nothing useful to
+  // carry over.
+  function setType(questionType: QuestionType) {
+    onChange({
+      ...emptyQuestionDraft(questionType),
+      questionText: draft.questionText,
+      explanation: draft.explanation,
+      topics: draft.topics,
+      tip: draft.tip,
+      imageUrl: draft.imageUrl,
+    });
+  }
+
   return (
     <div className="mb-3 rounded-xl border border-border bg-card p-4">
+      <label className="mb-2.5 block">
+        <span className="mb-1.5 block text-sm text-muted-foreground">Question type</span>
+        <select value={draft.questionType} onChange={(e) => setType(e.target.value as QuestionType)} className={`${inputClass} w-full`}>
+          {QUESTION_TYPE_ORDER.map((t) => (
+            <option key={t} value={t}>
+              {QUESTION_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <input
         value={draft.questionText}
         onChange={(e) => onChange({ ...draft, questionText: e.target.value })}
         placeholder="Question text"
         className={`${inputClass} mb-2.5 w-full`}
       />
-      <div className="mb-2.5 flex flex-col gap-1.5">
-        {draft.options.map((opt, oi) => (
-          <div key={oi} className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="correct-option"
-              checked={draft.correctIndex === oi}
-              onChange={() => onChange({ ...draft, correctIndex: oi })}
-              title="Mark as the correct answer"
-            />
-            <input
-              value={opt}
-              onChange={(e) => {
-                const options = [...draft.options];
-                options[oi] = e.target.value;
-                onChange({ ...draft, options });
-              }}
-              placeholder={`Option ${OPTION_LABELS[oi].toUpperCase()}`}
-              className={`${inputClass} flex-1`}
-            />
-            {draft.options.length > 3 && (
-              <button
-                onClick={() => {
-                  const options = draft.options.filter((_, i) => i !== oi);
-                  const correctIndex = draft.correctIndex === oi ? 0 : draft.correctIndex > oi ? draft.correctIndex - 1 : draft.correctIndex;
-                  onChange({ ...draft, options, correctIndex });
+
+      {draft.questionType === "mcq" && (
+        <div className="mb-2.5 flex flex-col gap-1.5">
+          {draft.options.map((opt, oi) => (
+            <div key={oi} className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="correct-option"
+                checked={draft.correctIndex === oi}
+                onChange={() => onChange({ ...draft, correctIndex: oi })}
+                title="Mark as the correct answer"
+              />
+              <input
+                value={opt}
+                onChange={(e) => {
+                  const options = [...draft.options];
+                  options[oi] = e.target.value;
+                  onChange({ ...draft, options });
                 }}
-                className="text-sm font-medium text-destructive hover:underline"
-              >
-                Remove
-              </button>
-            )}
+                placeholder={`Option ${OPTION_LABELS[oi].toUpperCase()}`}
+                className={`${inputClass} flex-1`}
+              />
+              {draft.options.length > 3 && (
+                <button
+                  onClick={() => {
+                    const options = draft.options.filter((_, i) => i !== oi);
+                    const correctIndex = draft.correctIndex === oi ? 0 : draft.correctIndex > oi ? draft.correctIndex - 1 : draft.correctIndex;
+                    onChange({ ...draft, options, correctIndex });
+                  }}
+                  className="text-sm font-medium text-destructive hover:underline"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+          {draft.options.length < 6 && (
+            <button
+              onClick={() => onChange({ ...draft, options: [...draft.options, ""] })}
+              className="self-start text-sm font-semibold text-primary hover:underline"
+            >
+              + Add option
+            </button>
+          )}
+        </div>
+      )}
+
+      {draft.questionType === "true_false" && (
+        <div className="mb-2.5 flex flex-col gap-1.5">
+          {(["True", "False"] as const).map((label, oi) => (
+            <label key={label} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="correct-option"
+                checked={draft.correctIndex === oi}
+                onChange={() => onChange({ ...draft, correctIndex: oi })}
+                title="Mark as the correct answer"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
+
+      {(draft.questionType === "fill_blank" || draft.questionType === "missing_number" || draft.questionType === "missing_spelling") && (
+        <div className="mb-2.5">
+          <p className="mb-1.5 text-sm text-muted-foreground">
+            Accepted answers
+            {draft.questionType === "missing_spelling" ? " (checked exactly as spelled - case-sensitive)" : " (any one of these counts as correct)"}
+          </p>
+          <StringListEditor
+            values={draft.acceptedAnswers}
+            onChange={(acceptedAnswers) => onChange({ ...draft, acceptedAnswers })}
+            placeholder="Accepted answer"
+          />
+        </div>
+      )}
+
+      {draft.questionType === "match_column" && (
+        <div className="mb-2.5">
+          <p className="mb-1.5 text-sm text-muted-foreground">Pairs to match (each row is one correct pair - at least 2 needed)</p>
+          <div className="flex flex-col gap-1.5">
+            {draft.pairs.map((pair, pi) => (
+              <div key={pi} className="flex items-center gap-2">
+                <input
+                  value={pair.left}
+                  onChange={(e) => {
+                    const pairs = [...draft.pairs];
+                    pairs[pi] = { ...pairs[pi], left: e.target.value };
+                    onChange({ ...draft, pairs });
+                  }}
+                  placeholder="Left item"
+                  className={`${inputClass} flex-1`}
+                />
+                <span className="text-muted-foreground">&#8596;</span>
+                <input
+                  value={pair.right}
+                  onChange={(e) => {
+                    const pairs = [...draft.pairs];
+                    pairs[pi] = { ...pairs[pi], right: e.target.value };
+                    onChange({ ...draft, pairs });
+                  }}
+                  placeholder="Right item"
+                  className={`${inputClass} flex-1`}
+                />
+                {draft.pairs.length > 2 && (
+                  <button
+                    onClick={() => onChange({ ...draft, pairs: draft.pairs.filter((_, i) => i !== pi) })}
+                    className="text-sm font-medium text-destructive hover:underline"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              onClick={() => onChange({ ...draft, pairs: [...draft.pairs, { left: "", right: "" }] })}
+              className="self-start text-sm font-semibold text-primary hover:underline"
+            >
+              + Add pair
+            </button>
           </div>
-        ))}
-        {draft.options.length < 6 && (
-          <button
-            onClick={() => onChange({ ...draft, options: [...draft.options, ""] })}
-            className="self-start text-sm font-semibold text-primary hover:underline"
-          >
-            + Add option
-          </button>
-        )}
-      </div>
+        </div>
+      )}
+
+      {(draft.questionType === "short_answer" || draft.questionType === "long_answer") && (
+        <div className="mb-2.5">
+          <p className="mb-1.5 text-sm text-muted-foreground">
+            Model answer key points (shown afterward for the child to self-compare - not auto-graded for content, only spell-checked)
+          </p>
+          <StringListEditor
+            values={draft.rubricKeyPoints}
+            onChange={(rubricKeyPoints) => onChange({ ...draft, rubricKeyPoints })}
+            placeholder="Key point"
+          />
+        </div>
+      )}
+
       <textarea
         value={draft.explanation}
         onChange={(e) => onChange({ ...draft, explanation: e.target.value })}
@@ -167,6 +461,12 @@ function QuestionForm({
         value={draft.tip}
         onChange={(e) => onChange({ ...draft, tip: e.target.value })}
         placeholder="Tip (optional)"
+        className={`${inputClass} mb-2.5 w-full`}
+      />
+      <input
+        value={draft.imageUrl}
+        onChange={(e) => onChange({ ...draft, imageUrl: e.target.value })}
+        placeholder="Image URL (optional)"
         className={`${inputClass} mb-3 w-full`}
       />
       <div className="flex gap-2.5">
@@ -284,7 +584,7 @@ function QuestionsTab() {
             variant="secondary"
             onClick={() => {
               setAddingDocumentId(documentOptions[0].documentId);
-              setAddDraft({ questionText: "", options: ["", "", "", ""], correctIndex: 0, explanation: "", topics: "", tip: "" });
+              setAddDraft(emptyQuestionDraft());
             }}
           >
             + Add question
@@ -343,7 +643,14 @@ function QuestionsTab() {
             <div key={q.id} className="rounded-xl border border-border bg-card p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="mb-1 font-semibold">{q.questionText}</p>
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <p className="font-semibold">{q.questionText}</p>
+                    {q.questionType !== "mcq" && (
+                      <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
+                        {QUESTION_TYPE_LABELS[q.questionType]}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-muted-foreground">
                     {q.subjectName}
                     {q.className ? ` · ${q.className}` : ""}
@@ -388,6 +695,292 @@ function QuestionsTab() {
 // admin-only detail per profile, not a whole new area of the app.
 // Fetched lazily (only once a row is actually expanded) since most
 // profiles won't be looked at on a given admin visit.
+// Shared by TopicsTab's "add" and "edit" forms. Defined at module scope
+// (not nested inside TopicsTab) so its identity is stable across
+// TopicsTab re-renders - a component defined inside another component's
+// body gets recreated (and its inputs remount, dropping focus) on every
+// keystroke otherwise.
+type TopicDraft = { classId: string; subjectId: string; name: string; displayOrder: string; difficulty: TopicDifficulty };
+
+function TopicFormFields({
+  draft,
+  onChange,
+  classes,
+  subjectsList,
+}: {
+  draft: TopicDraft;
+  onChange: (d: TopicDraft) => void;
+  classes: PkClass[];
+  subjectsList: Subject[];
+}) {
+  return (
+    <div className="mb-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <select value={draft.classId} onChange={(e) => onChange({ ...draft, classId: e.target.value })} className={inputClass}>
+        {classes.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      <select value={draft.subjectId} onChange={(e) => onChange({ ...draft, subjectId: e.target.value })} className={inputClass}>
+        {subjectsList.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </select>
+      <input
+        value={draft.name}
+        onChange={(e) => onChange({ ...draft, name: e.target.value })}
+        placeholder="Topic name"
+        className={inputClass}
+      />
+      <input
+        type="number"
+        value={draft.displayOrder}
+        onChange={(e) => onChange({ ...draft, displayOrder: e.target.value })}
+        placeholder="Display order"
+        className={inputClass}
+      />
+      <select
+        value={draft.difficulty}
+        onChange={(e) => onChange({ ...draft, difficulty: e.target.value as TopicDifficulty })}
+        className={inputClass}
+      >
+        <option value="beginner">Beginner</option>
+        <option value="medium">Medium</option>
+        <option value="hard">Hard</option>
+      </select>
+    </div>
+  );
+}
+
+const DIFFICULTY_LABEL: Record<TopicDifficulty, string> = { beginner: "Beginner", medium: "Medium", hard: "Hard" };
+
+// Subject + topic management (build order step 3/7 in
+// Question-Types-and-Content-Authoring-Plan.md) - topics are class+
+// subject scoped, ordered, and carry a difficulty tag that drives both
+// the quest map's node sequence and the Beginner/Medium/Hard reward
+// labels. Subjects here are just name + create, since they're otherwise
+// flat and already listed by the public GET /subjects.
+function TopicsTab() {
+  const [classes, setClasses] = useState<PkClass[] | null>(null);
+  const [subjectsList, setSubjectsList] = useState<Subject[] | null>(null);
+  const [rows, setRows] = useState<AdminTopic[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [newSubjectName, setNewSubjectName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<TopicDraft | null>(null);
+  const [addDraft, setAddDraft] = useState<TopicDraft | null>(null);
+
+  function load() {
+    setError(null);
+    Promise.all([getClasses(), getSubjects(), getAdminTopics()])
+      .then(([c, s, t]) => {
+        setClasses(c);
+        setSubjectsList(s);
+        setRows(t);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load topics"));
+  }
+
+  useEffect(load, []);
+
+  function blankDraft(): TopicDraft {
+    return {
+      classId: classes?.[0]?.id ?? "",
+      subjectId: subjectsList?.[0]?.id ?? "",
+      name: "",
+      displayOrder: "0",
+      difficulty: "beginner",
+    };
+  }
+
+  async function handleAddSubject() {
+    const name = newSubjectName.trim();
+    if (!name) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await createAdminSubject(name);
+      setNewSubjectName("");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create subject");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveAdd() {
+    if (!addDraft || !addDraft.classId || !addDraft.subjectId || !addDraft.name.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await createAdminTopic({
+        classId: addDraft.classId,
+        subjectId: addDraft.subjectId,
+        name: addDraft.name.trim(),
+        displayOrder: Number(addDraft.displayOrder) || 0,
+        difficulty: addDraft.difficulty,
+      });
+      setAddDraft(null);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create topic");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!editingId || !editDraft || !editDraft.name.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await updateAdminTopic(editingId, {
+        classId: editDraft.classId,
+        subjectId: editDraft.subjectId,
+        name: editDraft.name.trim(),
+        displayOrder: Number(editDraft.displayOrder) || 0,
+        difficulty: editDraft.difficulty,
+      });
+      setEditingId(null);
+      setEditDraft(null);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save topic");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete(id: string, name: string) {
+    if (!window.confirm(`Delete topic "${name}"? This can't be undone.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteAdminTopic(id);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete topic");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <div className="mb-4 rounded-xl border border-border bg-card p-4">
+        <p className="mb-2 text-sm font-semibold">Add a subject</p>
+        <div className="flex gap-2">
+          <input
+            value={newSubjectName}
+            onChange={(e) => setNewSubjectName(e.target.value)}
+            placeholder="Subject name (e.g. Religion)"
+            className={`${inputClass} flex-1`}
+          />
+          <Button size="sm" variant="secondary" onClick={handleAddSubject} disabled={busy || !newSubjectName.trim()}>
+            Add subject
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          Topics drive both the quest map's node order and the Beginner/Medium/Hard difficulty labels.
+        </p>
+        {!addDraft && classes && subjectsList && (
+          <Button size="sm" onClick={() => setAddDraft(blankDraft())} disabled={classes.length === 0 || subjectsList.length === 0}>
+            + Add topic
+          </Button>
+        )}
+      </div>
+
+      {addDraft && classes && subjectsList && (
+        <div className="mb-4 rounded-xl border border-border bg-card p-4">
+          <TopicFormFields draft={addDraft} onChange={setAddDraft} classes={classes} subjectsList={subjectsList} />
+          <div className="flex gap-2.5">
+            <Button size="sm" onClick={handleSaveAdd} disabled={busy || !addDraft.classId || !addDraft.subjectId || !addDraft.name.trim()}>
+              {busy ? "Saving..." : "Save"}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setAddDraft(null)} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="mb-3 text-sm font-medium text-destructive">{error}</p>}
+      {rows === null && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {rows !== null && rows.length === 0 && <p className="text-sm text-muted-foreground">No topics yet.</p>}
+
+      <div className="space-y-3">
+        {rows?.map((t) =>
+          editingId === t.id && editDraft && classes && subjectsList ? (
+            <div key={t.id} className="rounded-xl border border-border bg-card p-4">
+              <TopicFormFields draft={editDraft} onChange={setEditDraft} classes={classes} subjectsList={subjectsList} />
+              <div className="flex gap-2.5">
+                <Button size="sm" onClick={handleSaveEdit} disabled={busy || !editDraft.name.trim()}>
+                  {busy ? "Saving..." : "Save"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setEditingId(null);
+                    setEditDraft(null);
+                  }}
+                  disabled={busy}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div key={t.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
+              <div>
+                <p className="font-semibold">{t.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  {t.subjectName} · {t.className} · order {t.displayOrder} · {DIFFICULTY_LABEL[t.difficulty]}
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setEditingId(t.id);
+                    setEditDraft({
+                      classId: t.classId,
+                      subjectId: t.subjectId,
+                      name: t.name,
+                      displayOrder: String(t.displayOrder),
+                      difficulty: t.difficulty,
+                    });
+                  }}
+                >
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="text-destructive"
+                  onClick={() => handleDelete(t.id, t.name)}
+                  disabled={busy}
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StudyBuddyInsightsPanel({ profileId, profileName }: { profileId: string; profileName: string }) {
   const [data, setData] = useState<TutorInsightsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -781,6 +1374,7 @@ function StudyBuddyTab() {
 
 const TABS: { key: Tab; label: string; icon: typeof Bird }[] = [
   { key: "questions", label: "Questions", icon: FileUp },
+  { key: "topics", label: "Topics", icon: LayoutGrid },
   { key: "users", label: "Users", icon: Users },
   { key: "content", label: "Add content", icon: FileUp },
   { key: "studyBuddy", label: "Study Buddy", icon: Settings2 },
@@ -827,6 +1421,7 @@ export function AdminDashboard({ admin, onLogOut }: { admin: AdminUser; onLogOut
 
         <div className="mt-6">
           {tab === "questions" && <QuestionsTab />}
+          {tab === "topics" && <TopicsTab />}
           {tab === "users" && <UsersTab />}
           {tab === "content" && <Upload />}
           {tab === "studyBuddy" && <StudyBuddyTab />}
