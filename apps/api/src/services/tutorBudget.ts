@@ -30,6 +30,11 @@ export interface AppSettings {
   tutorEnabled: boolean;
   tutorDailyCapPerProfile: number;
   tutorSharedDailyBudget: number | null;
+  // Track 2's three-way "Resource Access" toggle (migration 0022) - see
+  // that migration's comment for what each one gates. All default true.
+  tutorUseConceptGuides: boolean;
+  tutorUseCache: boolean;
+  tutorUseGemini: boolean;
 }
 
 // Matches the migration's own defaults - used only if app_settings'
@@ -42,6 +47,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   tutorEnabled: true,
   tutorDailyCapPerProfile: 30,
   tutorSharedDailyBudget: null,
+  tutorUseConceptGuides: true,
+  tutorUseCache: true,
+  tutorUseGemini: true,
 };
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -49,7 +57,10 @@ export async function getAppSettings(): Promise<AppSettings> {
     select
       tutor_enabled as "tutorEnabled",
       tutor_daily_cap_per_profile as "tutorDailyCapPerProfile",
-      tutor_shared_daily_budget as "tutorSharedDailyBudget"
+      tutor_shared_daily_budget as "tutorSharedDailyBudget",
+      tutor_use_concept_guides as "tutorUseConceptGuides",
+      tutor_use_cache as "tutorUseCache",
+      tutor_use_gemini as "tutorUseGemini"
     from app_settings
     where id = true
     limit 1
@@ -130,6 +141,58 @@ export async function checkDailyCap(profileId: string): Promise<DailyCapCheck> {
 }
 
 /**
+ * Track 2's "Cache" toggle (tutor_use_cache), ported from Custom Gemini's
+ * get_cached_gemini_answer (~/Work/AI-ML/Custom Gemini/db_client.py) -
+ * reuse a previous REAL Gemini answer to the same scoped question instead
+ * of spending another call. Call this before checkDailyCap specifically
+ * (tutor.ts) - a cache hit should cost no quota at all, the same way the
+ * reference prototype's cache check runs before its Gemini-call attempt.
+ *
+ * "Same scoped question" means an exact (trimmed, case-insensitive) text
+ * match from this profile, in this class+subject, same as the reference -
+ * fuzzy-matching a cache key felt like a good way to serve a stale answer
+ * to a differently-intended question. Only ever returns an answer that
+ * was itself a genuine Gemini reply (matched_source_type 'question' or
+ * 'concept_guide', i.e. reply.mode "ai" when it was first recorded by
+ * recordTutorExchange below) - never a 'grounded', 'template', or already-
+ * 'cached' reply, so a cache hit always traces back to one real call.
+ */
+export async function getCachedReply(params: {
+  profileId: string;
+  classId: string;
+  subjectId: string;
+  queryText: string;
+}): Promise<string | null> {
+  const { profileId, classId, subjectId, queryText } = params;
+
+  const rows = await db.execute(sql`
+    select agent.content
+    from tutor_messages student
+    join tutor_conversations tc on tc.id = student.conversation_id
+    join lateral (
+      select content
+      from tutor_messages a
+      where a.conversation_id = student.conversation_id
+        and a.role = 'agent'
+        and a.matched_source_type in ('question', 'concept_guide')
+        and a.created_at >= student.created_at
+      order by a.created_at asc
+      limit 1
+    ) agent on true
+    where tc.profile_id = ${profileId}
+      and tc.class_id = ${classId}
+      and tc.subject_id = ${subjectId}
+      and student.role = 'student'
+      and lower(trim(student.content)) = lower(trim(${queryText}))
+    order by student.created_at desc
+    limit 1
+  `);
+
+  const row = rows[0] as unknown as { content: string } | undefined;
+  return row?.content ?? null;
+}
+
+/**
  * Call this AFTER generateTutorReply, once both the student's message and
  * the reply actually sent are known. Records both turns and bumps the
  * conversation's lastMessageAt. The "top" retrieved source (RetrievalResult
@@ -157,7 +220,7 @@ export async function recordSimpleTutorExchange(params: {
   conversationId: string;
   studentMessage?: string;
   replyText: string;
-  sourceType: "social" | "fun_content" | "reveal_offer" | "quiz_question" | "quiz_reveal_offer";
+  sourceType: "social" | "fun_content" | "reveal_offer" | "quiz_question" | "quiz_reveal_offer" | "cached";
   sourceId?: string;
 }): Promise<void> {
   const { conversationId, studentMessage, replyText, sourceType, sourceId } = params;

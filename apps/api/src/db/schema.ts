@@ -319,6 +319,12 @@ export const appSettings = pgTable("app_settings", {
   tutorEnabled: boolean("tutor_enabled").notNull().default(true),
   tutorDailyCapPerProfile: integer("tutor_daily_cap_per_profile").notNull().default(30),
   tutorSharedDailyBudget: integer("tutor_shared_daily_budget"),
+  // Track 2's three-way "Resource Access" toggle (migration 0022),
+  // ported from the Custom Gemini reference prototype - see that
+  // migration's own comment for what each one gates.
+  tutorUseConceptGuides: boolean("tutor_use_concept_guides").notNull().default(true),
+  tutorUseCache: boolean("tutor_use_cache").notNull().default(true),
+  tutorUseGemini: boolean("tutor_use_gemini").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

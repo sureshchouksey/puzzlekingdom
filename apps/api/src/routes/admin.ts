@@ -24,6 +24,11 @@ const settingsWriteSchema = z.object({
   tutorEnabled: z.boolean().optional(),
   tutorDailyCapPerProfile: z.number().int().positive().optional(),
   tutorSharedDailyBudget: z.number().int().positive().nullable().optional(),
+  // Track 2's three-way Resource Access toggle (migration 0022) - see
+  // tutorBudget.ts's AppSettings for what each one gates.
+  tutorUseConceptGuides: z.boolean().optional(),
+  tutorUseCache: z.boolean().optional(),
+  tutorUseGemini: z.boolean().optional(),
 });
 
 // The 8 question types from Question-Types-and-Content-Authoring-Plan.md's
@@ -580,6 +585,9 @@ export async function adminRoutes(app: FastifyInstance) {
       tutorDailyCapPerProfile: body.tutorDailyCapPerProfile ?? current.tutorDailyCapPerProfile,
       tutorSharedDailyBudget:
         body.tutorSharedDailyBudget !== undefined ? body.tutorSharedDailyBudget : current.tutorSharedDailyBudget,
+      tutorUseConceptGuides: body.tutorUseConceptGuides ?? current.tutorUseConceptGuides,
+      tutorUseCache: body.tutorUseCache ?? current.tutorUseCache,
+      tutorUseGemini: body.tutorUseGemini ?? current.tutorUseGemini,
     };
 
     await db.execute(sql`
@@ -588,6 +596,9 @@ export async function adminRoutes(app: FastifyInstance) {
         tutor_enabled = ${next.tutorEnabled},
         tutor_daily_cap_per_profile = ${next.tutorDailyCapPerProfile},
         tutor_shared_daily_budget = ${next.tutorSharedDailyBudget},
+        tutor_use_concept_guides = ${next.tutorUseConceptGuides},
+        tutor_use_cache = ${next.tutorUseCache},
+        tutor_use_gemini = ${next.tutorUseGemini},
         updated_at = now()
       where id = true
     `);

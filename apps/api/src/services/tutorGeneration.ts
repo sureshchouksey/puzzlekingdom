@@ -270,11 +270,26 @@ async function callGemini(queryText: string, sources: RetrievedSource[]): Promis
 export async function generateTutorReply(params: {
   queryText: string;
   retrieval: RetrievalResult;
+  // Track 2's "Gemini" toggle (tutor_use_gemini) - when false, never
+  // attempt the Gemini call below at all and serve a real match straight
+  // from the database instead (mode "grounded"), exactly the same
+  // graceful path already used when a real Gemini call fails. Defaults
+  // true so every existing caller keeps today's behaviour unchanged.
+  useGemini?: boolean;
 }): Promise<TutorReply> {
-  const { queryText, retrieval } = params;
+  const { queryText, retrieval, useGemini = true } = params;
 
   if (!retrieval.matched) {
     return { mode: "template", reply: TEMPLATE_FALLBACK_REPLY, groundedSourceIds: [] };
+  }
+
+  if (!useGemini) {
+    const topSource = retrieval.sources[0];
+    return {
+      mode: "grounded",
+      reply: formatGroundedReply(topSource, queryText),
+      groundedSourceIds: [topSource.id],
+    };
   }
 
   try {

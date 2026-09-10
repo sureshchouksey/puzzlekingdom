@@ -3,7 +3,14 @@ import { eq, and, desc, gte, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { classes, subjects, tutorConversations, tutorMessages } from "../db/schema.js";
 import { requireIdentity } from "../auth.js";
-import { isTutorEnabled, checkDailyCap, recordTutorExchange, recordSimpleTutorExchange } from "../services/tutorBudget.js";
+import {
+  isTutorEnabled,
+  checkDailyCap,
+  recordTutorExchange,
+  recordSimpleTutorExchange,
+  getAppSettings,
+  getCachedReply,
+} from "../services/tutorBudget.js";
 import { retrieveForQuery, retrieveForQuestion } from "../services/tutorRetrieval.js";
 import { generateTutorReply } from "../services/tutorGeneration.js";
 import { classifyTutorIntent } from "../services/tutorIntent.js";
@@ -545,6 +552,35 @@ export async function tutorRoutes(app: FastifyInstance) {
         // retrieval -> generation pipeline below, unchanged.
       }
 
+      // Track 2's three-way Resource Access toggle (migration 0022,
+      // ported from ~/Work/AI-ML/Custom Gemini's use_concept_guides/
+      // use_cache/use_gemini session toggles) - read once and threaded
+      // through the cache check, retrieval, and generation below.
+      const settings = await getAppSettings();
+
+      // The "Cache" toggle - reuse a previous real Gemini answer to this
+      // same scoped question before spending any quota at all, so this
+      // deliberately runs BEFORE checkDailyCap, same as the reference
+      // prototype's cache-before-Gemini ordering. See tutorBudget.ts's
+      // getCachedReply doc comment for exactly what counts as a hit.
+      if (settings.tutorUseCache) {
+        const cached = await getCachedReply({
+          profileId: conversation.profileId,
+          classId: conversation.classId,
+          subjectId: conversation.subjectId,
+          queryText: message,
+        });
+        if (cached) {
+          await recordSimpleTutorExchange({
+            conversationId: conversation.id,
+            studentMessage: message,
+            replyText: cached,
+            sourceType: "cached",
+          });
+          return reply.send({ mode: "cached", reply: cached });
+        }
+      }
+
       // Only now, once a message has actually been classified as
       // academic (the one path that can call Gemini for a real answer),
       // does the cost-focused daily cap apply - see tutorBudget.ts's
@@ -561,14 +597,20 @@ export async function tutorRoutes(app: FastifyInstance) {
               questionId: conversation.relatedQuestionId!,
               classId: conversation.classId,
               subjectId: conversation.subjectId,
+              useConceptGuides: settings.tutorUseConceptGuides,
             })
           : await retrieveForQuery({
               queryText: message,
               classId: conversation.classId,
               subjectId: conversation.subjectId,
+              useConceptGuides: settings.tutorUseConceptGuides,
             });
 
-      const tutorReply = await generateTutorReply({ queryText: message, retrieval });
+      const tutorReply = await generateTutorReply({
+        queryText: message,
+        retrieval,
+        useGemini: settings.tutorUseGemini,
+      });
 
       await recordTutorExchange({
         conversationId: conversation.id,

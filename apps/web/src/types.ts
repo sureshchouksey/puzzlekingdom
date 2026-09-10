@@ -512,11 +512,14 @@ export type TutorTranscript = {
 // What POST /tutor/conversations/:id/messages actually returns for one
 // student message: "ai" is a real Gemini-generated reply, "grounded" is
 // real matched content (a concept guide or question explanation) served
-// directly because Gemini itself failed, "template" is the honest "I
-// don't know" fallback for a genuine non-match - see tutorGeneration.ts
-// for all three. "blocked" means the budget/toggle check stopped the
-// message before retrieval/generation ever ran (see `reason`).
-export type TutorMessageMode = "ai" | "template" | "grounded" | "blocked";
+// directly because Gemini itself failed (or the "Gemini" toggle is off,
+// see tutorGeneration.ts), "template" is the honest "I don't know"
+// fallback for a genuine non-match. "cached" is a previous real "ai"
+// reply to this same question reused via the "Cache" toggle
+// (tutorBudget.ts's getCachedReply), costing no new Gemini call.
+// "blocked" means the budget/toggle check stopped the message before
+// retrieval/generation ever ran (see `reason`).
+export type TutorMessageMode = "ai" | "template" | "grounded" | "blocked" | "cached";
 
 export type TutorMessageResponse = {
   mode: TutorMessageMode;
@@ -572,4 +575,9 @@ export type TutorSettings = {
   tutorEnabled: boolean;
   tutorDailyCapPerProfile: number;
   tutorSharedDailyBudget: number | null;
+  // Track 2's three-way Resource Access toggle, ported from the Custom
+  // Gemini reference prototype - each independently switchable.
+  tutorUseConceptGuides: boolean;
+  tutorUseCache: boolean;
+  tutorUseGemini: boolean;
 };

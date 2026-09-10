@@ -1239,6 +1239,41 @@ function StudyBuddySettingsPanel() {
         />
       </label>
 
+      <div className="mb-4 border-t border-border pt-4">
+        <p className="mb-1 text-sm font-medium">Resource access</p>
+        <p className="mb-3 text-sm text-muted-foreground">
+          What Study Buddy is allowed to use when answering an academic question. All three on is normal
+          behaviour - turn one off to test or restrict how a reply gets built.
+        </p>
+
+        <label className="mb-3 flex cursor-pointer items-center gap-2.5">
+          <input
+            type="checkbox"
+            checked={draft.tutorUseConceptGuides}
+            onChange={(e) => setDraft({ ...draft, tutorUseConceptGuides: e.target.checked })}
+          />
+          <span>Concept guides {draft.tutorUseConceptGuides ? "on" : "off"} - match against lesson guides, not just questions</span>
+        </label>
+
+        <label className="mb-3 flex cursor-pointer items-center gap-2.5">
+          <input
+            type="checkbox"
+            checked={draft.tutorUseCache}
+            onChange={(e) => setDraft({ ...draft, tutorUseCache: e.target.checked })}
+          />
+          <span>Cached answers {draft.tutorUseCache ? "on" : "off"} - reuse a previous real answer to the same question</span>
+        </label>
+
+        <label className="flex cursor-pointer items-center gap-2.5">
+          <input
+            type="checkbox"
+            checked={draft.tutorUseGemini}
+            onChange={(e) => setDraft({ ...draft, tutorUseGemini: e.target.checked })}
+          />
+          <span>Gemini {draft.tutorUseGemini ? "on" : "off"} - when off, matched content is served directly with no AI rephrasing</span>
+        </label>
+      </div>
+
       <div className="flex items-center gap-3">
         <Button size="sm" onClick={handleSave} disabled={saving || !dirty}>
           {saving ? "Saving..." : "Save"}

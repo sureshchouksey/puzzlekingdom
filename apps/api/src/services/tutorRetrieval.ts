@@ -145,8 +145,13 @@ export async function retrieveForQuestion(params: {
   questionId: string;
   classId: string;
   subjectId: string;
+  // Track 2's "Concept Guides" toggle (tutor_use_concept_guides) - when
+  // false, skip the concept-guide lookup below entirely and answer only
+  // from the question's own explanation/tip. Defaults true so every
+  // existing caller keeps today's behaviour unchanged.
+  useConceptGuides?: boolean;
 }): Promise<RetrievalResult> {
-  const { questionId, classId, subjectId } = params;
+  const { questionId, classId, subjectId, useConceptGuides = true } = params;
 
   const questionRows = await db.execute(sql`
     select id, question_text as "questionText", explanation, tip, topics
@@ -166,7 +171,7 @@ export async function retrieveForQuestion(params: {
 
   const topics = question.topics ?? [];
   const guideRows =
-    topics.length === 0
+    !useConceptGuides || topics.length === 0
       ? []
       : await db.execute(sql`
           select id, topic, title, method_text as "methodText", formula
@@ -229,8 +234,11 @@ export async function retrieveForQuery(params: {
   queryText: string;
   classId: string;
   subjectId: string;
+  // Same Track 2 "Concept Guides" toggle as retrieveForQuestion above -
+  // when false, this becomes a questions-only search.
+  useConceptGuides?: boolean;
 }): Promise<RetrievalResult> {
-  const { queryText, classId, subjectId } = params;
+  const { queryText, classId, subjectId, useConceptGuides = true } = params;
 
   const orQuery = await buildOrTsQuery(queryText);
   if (!orQuery) {
@@ -239,21 +247,23 @@ export async function retrieveForQuery(params: {
     return { matched: false, sources: [] };
   }
 
-  const guideRows = await db.execute(sql`
-    select
-      id, topic, title, method_text as "methodText", formula,
-      ts_rank(
-        to_tsvector('english', title || ' ' || method_text),
-        to_tsquery('english', ${orQuery})
-      ) as rank
-    from concept_guides
-    where class_id = ${classId}
-      and subject_id = ${subjectId}
-      and to_tsvector('english', title || ' ' || method_text)
-          @@ to_tsquery('english', ${orQuery})
-    order by rank desc
-    limit ${MAX_RESULTS}
-  `);
+  const guideRows = !useConceptGuides
+    ? []
+    : await db.execute(sql`
+        select
+          id, topic, title, method_text as "methodText", formula,
+          ts_rank(
+            to_tsvector('english', title || ' ' || method_text),
+            to_tsquery('english', ${orQuery})
+          ) as rank
+        from concept_guides
+        where class_id = ${classId}
+          and subject_id = ${subjectId}
+          and to_tsvector('english', title || ' ' || method_text)
+              @@ to_tsquery('english', ${orQuery})
+        order by rank desc
+        limit ${MAX_RESULTS}
+      `);
 
   const questionRows = await db.execute(sql`
     select
