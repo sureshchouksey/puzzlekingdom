@@ -1,0 +1,27 @@
+# Keep-alive ping for the Render free-tier API (Track 0, Day 2 decision:
+# stay on Render's free plan and ping it instead of paying ~$7/mo for an
+# always-on instance - see plan/Puzzle-Kingdom-Master-Roadmap.md).
+#
+# Render's free tier spins a service down after ~15 minutes of no
+# inbound traffic, so the next real request pays a slow cold-start
+# penalty. Pinging /health every 10 minutes keeps it warm without
+# GitHub Actions' own free minutes being a concern - each run is a
+# single curl, well under a second, on a public repo's unlimited free
+# minutes (or comfortably inside the free monthly minutes on a private
+# repo at this frequency).
+name: Keep API warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          curl -sS -o /dev/null -w "puzzlekingdom-api /health -> HTTP %{http_code} in %{time_total}s\n" \
+            --max-time 20 --retry 2 --retry-delay 5 \
+            https://puzzlekingdom-api.onrender.com/health
