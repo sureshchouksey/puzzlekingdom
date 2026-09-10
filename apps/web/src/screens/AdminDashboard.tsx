@@ -1,118 +1,79 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { Bird, FileUp, LayoutGrid, LogOut, Settings2, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  Bird,
+  CalendarClock,
+  FileUp,
+  Gamepad2,
+  Key,
+  LayoutGrid,
+  LogOut,
+  MessageCircle,
+  Search,
+  Settings2,
+  Sparkles,
+  Target,
+  ToggleLeft,
+  Trash2,
+  TrendingUp,
+  Users,
+} from "lucide-react";
+import { avatarFile } from "../avatars";
+import {
+  clearTutorInsights,
   createAdminQuestion,
   createAdminSubject,
   createAdminTopic,
   deleteAdminQuestion,
   deleteAdminTopic,
+  deleteAdminUser,
   generateTutorInsights,
   getAdminQuestions,
   getAdminTopics,
   getAdminUsers,
   getClasses,
   getSubjects,
+  getTopics,
+  getAppSettings,
   getTutorConversation,
   getTutorConversationsForProfile,
   getTutorInsights,
-  getTutorSettings,
   logout,
   resetProfilePin,
   updateAdminQuestion,
   updateAdminTopic,
-  updateTutorSettings,
+  updateAppSettings,
 } from "../api";
 import type {
   AdminQuestion,
-  AdminQuestionWriteInput,
   AdminTopic,
   AdminUser,
   AdminUserSummary,
+  AppSettings,
   PkClass,
-  QuestionType,
-  QuizOption,
   Subject,
   TopicDifficulty,
   TutorConversation,
   TutorInsightsResponse,
-  TutorSettings,
   TutorTranscript,
 } from "../types";
 import { Button } from "../components/ui/button";
 import { Upload } from "./Upload";
+import {
+  emptyQuestionDraft,
+  draftIsValid,
+  draftToWriteInput,
+  inputClass,
+  QuestionForm,
+  QUESTION_TYPE_LABELS,
+  type QuestionDraft,
+} from "../questionAuthoring";
 
-type Tab = "questions" | "topics" | "users" | "content" | "studyBuddy";
+type Tab = "questions" | "topics" | "users" | "content" | "studyBuddy" | "features";
 
-// Labels shown in the type picker and on non-mcq question cards - order
-// here is the order the picker lists them in, matching the plan doc's
-// own ordering (MCQ first since it's the existing/default type).
-const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
-  mcq: "Multiple choice",
-  true_false: "True / False",
-  fill_blank: "Fill in the blank",
-  missing_number: "Missing number",
-  missing_spelling: "Missing spelling",
-  match_column: "Match the column",
-  short_answer: "Short answer",
-  long_answer: "Long answer",
-};
-const QUESTION_TYPE_ORDER: QuestionType[] = [
-  "mcq",
-  "true_false",
-  "fill_blank",
-  "missing_number",
-  "missing_spelling",
-  "match_column",
-  "short_answer",
-  "long_answer",
-];
-
-const OPTION_LABELS = ["a", "b", "c", "d", "e", "f"] as const;
-
-const inputClass =
-  "rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring";
-
-// Draft shape shared by both the "edit an existing question" and "add a
-// question to an existing document" forms below. options/correctIndex
-// are used for mcq/true_false (options as plain strings keyed by
-// position, correctIndex picks which one is right, so the UI never has
-// to juggle option ids directly); acceptedAnswers/pairs/rubricKeyPoints
-// hold the other 6 types' answerPayload shapes in editable form - see
-// draftToWriteInput for how each maps to what admin.ts's
-// validateQuestionShape actually expects.
-type QuestionDraft = {
-  questionType: QuestionType;
-  questionText: string;
-  options: string[];
-  correctIndex: number;
-  explanation: string;
-  topics: string;
-  tip: string;
-  imageUrl: string;
-  acceptedAnswers: string[];
-  pairs: { left: string; right: string }[];
-  rubricKeyPoints: string[];
-};
-
-function emptyQuestionDraft(questionType: QuestionType = "mcq"): QuestionDraft {
-  return {
-    questionType,
-    questionText: "",
-    options: ["", "", "", ""],
-    correctIndex: 0,
-    explanation: "",
-    topics: "",
-    tip: "",
-    imageUrl: "",
-    acceptedAnswers: [""],
-    pairs: [
-      { left: "", right: "" },
-      { left: "", right: "" },
-    ],
-    rubricKeyPoints: [""],
-  };
-}
-
+// Fills a QuestionDraft from an existing DB question, for the "edit"
+// flow - Upload.tsx never needs this (it only ever creates new
+// questions), so it stays local to AdminDashboard.tsx rather than moving
+// into the shared questionAuthoring.tsx module.
 function draftFromQuestion(q: AdminQuestion): QuestionDraft {
   const payload = q.answerPayload ?? {};
   const pairs =
@@ -140,350 +101,90 @@ function draftFromQuestion(q: AdminQuestion): QuestionDraft {
   };
 }
 
-function draftToWriteInput(d: QuestionDraft, documentId?: string): AdminQuestionWriteInput {
-  const topics = d.topics
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-  const base = {
-    documentId,
-    questionType: d.questionType,
-    questionText: d.questionText.trim(),
-    explanation: d.explanation.trim(),
-    topics: topics.length ? topics : undefined,
-    tip: d.tip.trim() || undefined,
-    imageUrl: d.imageUrl.trim() || undefined,
-  };
-
-  switch (d.questionType) {
-    case "mcq": {
-      const options: QuizOption[] = d.options.map((text, i) => ({ id: OPTION_LABELS[i], text: text.trim() }));
-      return { ...base, options, correctOptionId: OPTION_LABELS[d.correctIndex], answerPayload: null };
-    }
-    case "true_false": {
-      const options: QuizOption[] = [
-        { id: "true", text: "True" },
-        { id: "false", text: "False" },
-      ];
-      return { ...base, options, correctOptionId: d.correctIndex === 0 ? "true" : "false", answerPayload: null };
-    }
-    case "fill_blank":
-    case "missing_number":
-    case "missing_spelling": {
-      const acceptedAnswers = d.acceptedAnswers.map((a) => a.trim()).filter(Boolean);
-      return { ...base, options: [], correctOptionId: "", answerPayload: { acceptedAnswers } };
-    }
-    case "match_column": {
-      const rows = d.pairs.map((p) => ({ left: p.left.trim(), right: p.right.trim() })).filter((p) => p.left && p.right);
-      return {
-        ...base,
-        options: [],
-        correctOptionId: "",
-        answerPayload: {
-          left: rows.map((r) => r.left),
-          right: rows.map((r) => r.right),
-          correctPairs: rows.map((_, i) => [i, i] as [number, number]),
-        },
-      };
-    }
-    case "short_answer":
-    case "long_answer": {
-      const rubricKeyPoints = d.rubricKeyPoints.map((r) => r.trim()).filter(Boolean);
-      return { ...base, options: [], correctOptionId: "", answerPayload: { rubricKeyPoints } };
-    }
-  }
-}
-
-function draftIsValid(d: QuestionDraft): boolean {
-  if (d.questionText.trim().length === 0 || d.explanation.trim().length === 0) return false;
-  switch (d.questionType) {
-    case "mcq":
-      return d.options.length >= 3 && d.options.every((o) => o.trim().length > 0);
-    case "true_false":
-      return true;
-    case "fill_blank":
-    case "missing_number":
-    case "missing_spelling":
-      return d.acceptedAnswers.some((a) => a.trim().length > 0);
-    case "match_column":
-      return d.pairs.filter((p) => p.left.trim().length > 0 && p.right.trim().length > 0).length >= 2;
-    case "short_answer":
-    case "long_answer":
-      return d.rubricKeyPoints.some((r) => r.trim().length > 0);
-  }
-}
-
-// A reorderable list of plain-text entries - shared by fill-in-blank/
-// missing-number/missing-spelling's "accepted answers" and short/long
-// answer's "model answer key points", the two places a question needs a
-// growable list of strings rather than a fixed shape.
-function StringListEditor({
-  values,
-  onChange,
-  placeholder,
-}: {
-  values: string[];
-  onChange: (next: string[]) => void;
-  placeholder: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      {values.map((v, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <input
-            value={v}
-            onChange={(e) => {
-              const next = [...values];
-              next[i] = e.target.value;
-              onChange(next);
-            }}
-            placeholder={placeholder}
-            className={`${inputClass} flex-1`}
-          />
-          {values.length > 1 && (
-            <button
-              onClick={() => onChange(values.filter((_, idx) => idx !== i))}
-              className="text-sm font-medium text-destructive hover:underline"
-            >
-              Remove
-            </button>
-          )}
-        </div>
-      ))}
-      <button onClick={() => onChange([...values, ""])} className="self-start text-sm font-semibold text-primary hover:underline">
-        + Add
-      </button>
-    </div>
-  );
-}
-
-function QuestionForm({
-  draft,
-  onChange,
-  onSave,
+// Replaces window.confirm() everywhere in this dashboard (delete
+// question/topic/user, reset PIN, clear insights) - added 10 September
+// 2026 after a real click-through found that native confirm() silently
+// no-ops inside the embedded Browser pane used to test this app (no
+// dialog appears, confirm() just returns false, so the button looked
+// completely dead with no error shown). An in-app dialog works the same
+// everywhere - a real browser tab, an embedded pane, any future webview -
+// and is also friendlier to browser-automation tooling in general, which
+// is warned off triggering native JS dialogs. One instance per component
+// that needs it (QuestionsTab/TopicsTab/UsersTab each get their own;
+// StudyBuddyInsightsPanel is a separate component so it gets its own
+// too) - only ever one confirmation pending at a time within that
+// component, which matches how these dashboards are actually used.
+function ConfirmDialog({
+  message,
+  onConfirm,
   onCancel,
-  saving,
+  busy,
 }: {
-  draft: QuestionDraft;
-  onChange: (d: QuestionDraft) => void;
-  onSave: () => void;
+  message: string;
+  onConfirm: () => void;
   onCancel: () => void;
-  saving: boolean;
+  busy: boolean;
 }) {
-  // Switching type resets the type-specific fields to a fresh default,
-  // keeping only what's shared across every type (question text,
-  // explanation, topics, tip, image) - the old type's
-  // options/answerPayload wouldn't validate against the new type anyway
-  // (see admin.ts's validateQuestionShape), so there's nothing useful to
-  // carry over.
-  function setType(questionType: QuestionType) {
-    onChange({
-      ...emptyQuestionDraft(questionType),
-      questionText: draft.questionText,
-      explanation: draft.explanation,
-      topics: draft.topics,
-      tip: draft.tip,
-      imageUrl: draft.imageUrl,
-    });
-  }
-
   return (
-    <div className="mb-3 rounded-xl border border-border bg-card p-4">
-      <label className="mb-2.5 block">
-        <span className="mb-1.5 block text-sm text-muted-foreground">Question type</span>
-        <select value={draft.questionType} onChange={(e) => setType(e.target.value as QuestionType)} className={`${inputClass} w-full`}>
-          {QUESTION_TYPE_ORDER.map((t) => (
-            <option key={t} value={t}>
-              {QUESTION_TYPE_LABELS[t]}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <input
-        value={draft.questionText}
-        onChange={(e) => onChange({ ...draft, questionText: e.target.value })}
-        placeholder="Question text"
-        className={`${inputClass} mb-2.5 w-full`}
-      />
-
-      {draft.questionType === "mcq" && (
-        <div className="mb-2.5 flex flex-col gap-1.5">
-          {draft.options.map((opt, oi) => (
-            <div key={oi} className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="correct-option"
-                checked={draft.correctIndex === oi}
-                onChange={() => onChange({ ...draft, correctIndex: oi })}
-                title="Mark as the correct answer"
-              />
-              <input
-                value={opt}
-                onChange={(e) => {
-                  const options = [...draft.options];
-                  options[oi] = e.target.value;
-                  onChange({ ...draft, options });
-                }}
-                placeholder={`Option ${OPTION_LABELS[oi].toUpperCase()}`}
-                className={`${inputClass} flex-1`}
-              />
-              {draft.options.length > 3 && (
-                <button
-                  onClick={() => {
-                    const options = draft.options.filter((_, i) => i !== oi);
-                    const correctIndex = draft.correctIndex === oi ? 0 : draft.correctIndex > oi ? draft.correctIndex - 1 : draft.correctIndex;
-                    onChange({ ...draft, options, correctIndex });
-                  }}
-                  className="text-sm font-medium text-destructive hover:underline"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-          ))}
-          {draft.options.length < 6 && (
-            <button
-              onClick={() => onChange({ ...draft, options: [...draft.options, ""] })}
-              className="self-start text-sm font-semibold text-primary hover:underline"
-            >
-              + Add option
-            </button>
-          )}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-lg" onClick={(e) => e.stopPropagation()}>
+        <p className="mb-4 text-sm">{message}</p>
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="secondary" onClick={onCancel} disabled={busy}>
+            Cancel
+          </Button>
+          <Button size="sm" variant="destructive" onClick={onConfirm} disabled={busy}>
+            {busy ? "Working..." : "Confirm"}
+          </Button>
         </div>
-      )}
-
-      {draft.questionType === "true_false" && (
-        <div className="mb-2.5 flex flex-col gap-1.5">
-          {(["True", "False"] as const).map((label, oi) => (
-            <label key={label} className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name="correct-option"
-                checked={draft.correctIndex === oi}
-                onChange={() => onChange({ ...draft, correctIndex: oi })}
-                title="Mark as the correct answer"
-              />
-              {label}
-            </label>
-          ))}
-        </div>
-      )}
-
-      {(draft.questionType === "fill_blank" || draft.questionType === "missing_number" || draft.questionType === "missing_spelling") && (
-        <div className="mb-2.5">
-          <p className="mb-1.5 text-sm text-muted-foreground">
-            Accepted answers
-            {draft.questionType === "missing_spelling" ? " (checked exactly as spelled - case-sensitive)" : " (any one of these counts as correct)"}
-          </p>
-          <StringListEditor
-            values={draft.acceptedAnswers}
-            onChange={(acceptedAnswers) => onChange({ ...draft, acceptedAnswers })}
-            placeholder="Accepted answer"
-          />
-        </div>
-      )}
-
-      {draft.questionType === "match_column" && (
-        <div className="mb-2.5">
-          <p className="mb-1.5 text-sm text-muted-foreground">Pairs to match (each row is one correct pair - at least 2 needed)</p>
-          <div className="flex flex-col gap-1.5">
-            {draft.pairs.map((pair, pi) => (
-              <div key={pi} className="flex items-center gap-2">
-                <input
-                  value={pair.left}
-                  onChange={(e) => {
-                    const pairs = [...draft.pairs];
-                    pairs[pi] = { ...pairs[pi], left: e.target.value };
-                    onChange({ ...draft, pairs });
-                  }}
-                  placeholder="Left item"
-                  className={`${inputClass} flex-1`}
-                />
-                <span className="text-muted-foreground">&#8596;</span>
-                <input
-                  value={pair.right}
-                  onChange={(e) => {
-                    const pairs = [...draft.pairs];
-                    pairs[pi] = { ...pairs[pi], right: e.target.value };
-                    onChange({ ...draft, pairs });
-                  }}
-                  placeholder="Right item"
-                  className={`${inputClass} flex-1`}
-                />
-                {draft.pairs.length > 2 && (
-                  <button
-                    onClick={() => onChange({ ...draft, pairs: draft.pairs.filter((_, i) => i !== pi) })}
-                    className="text-sm font-medium text-destructive hover:underline"
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              onClick={() => onChange({ ...draft, pairs: [...draft.pairs, { left: "", right: "" }] })}
-              className="self-start text-sm font-semibold text-primary hover:underline"
-            >
-              + Add pair
-            </button>
-          </div>
-        </div>
-      )}
-
-      {(draft.questionType === "short_answer" || draft.questionType === "long_answer") && (
-        <div className="mb-2.5">
-          <p className="mb-1.5 text-sm text-muted-foreground">
-            Model answer key points (shown afterward for the child to self-compare - not auto-graded for content, only spell-checked)
-          </p>
-          <StringListEditor
-            values={draft.rubricKeyPoints}
-            onChange={(rubricKeyPoints) => onChange({ ...draft, rubricKeyPoints })}
-            placeholder="Key point"
-          />
-        </div>
-      )}
-
-      <textarea
-        value={draft.explanation}
-        onChange={(e) => onChange({ ...draft, explanation: e.target.value })}
-        placeholder="Explanation"
-        rows={2}
-        className={`${inputClass} mb-2.5 w-full font-sans`}
-      />
-      <input
-        value={draft.topics}
-        onChange={(e) => onChange({ ...draft, topics: e.target.value })}
-        placeholder="Topics, comma-separated (optional)"
-        className={`${inputClass} mb-2.5 w-full`}
-      />
-      <input
-        value={draft.tip}
-        onChange={(e) => onChange({ ...draft, tip: e.target.value })}
-        placeholder="Tip (optional)"
-        className={`${inputClass} mb-2.5 w-full`}
-      />
-      <input
-        value={draft.imageUrl}
-        onChange={(e) => onChange({ ...draft, imageUrl: e.target.value })}
-        placeholder="Image URL (optional)"
-        className={`${inputClass} mb-3 w-full`}
-      />
-      <div className="flex gap-2.5">
-        <Button size="sm" onClick={onSave} disabled={saving || !draftIsValid(draft)}>
-          {saving ? "Saving..." : "Save"}
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onCancel} disabled={saving}>
-          Cancel
-        </Button>
       </div>
     </div>
   );
 }
 
+function useConfirm() {
+  const [pending, setPending] = useState<{ message: string; action: () => void | Promise<void> } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function requestConfirm(message: string, action: () => void | Promise<void>) {
+    setPending({ message, action });
+  }
+
+  async function handleConfirm() {
+    if (!pending) return;
+    setBusy(true);
+    try {
+      await pending.action();
+    } finally {
+      setBusy(false);
+      setPending(null);
+    }
+  }
+
+  const dialog = pending ? (
+    <ConfirmDialog message={pending.message} onConfirm={handleConfirm} onCancel={() => setPending(null)} busy={busy} />
+  ) : null;
+
+  return { requestConfirm, dialog };
+}
+
+const QUESTIONS_PAGE_SIZE = 10;
+
 function QuestionsTab() {
   const [rows, setRows] = useState<AdminQuestion[] | null>(null);
+  // Class/subject/topic are proper dropdowns, cascading the same way the
+  // rest of the app narrows topic - class and subject pick from the
+  // catalog (getClasses/getSubjects, same lists TopicsTab uses), and the
+  // topic dropdown is repopulated from GET /topics (classes.ts) - the
+  // distinct topic tags that actually exist on questions.topics for the
+  // chosen class+subject, so every option is guaranteed to match at least
+  // one question. Empty string means "all" for each.
+  const [classes, setClasses] = useState<PkClass[] | null>(null);
+  const [subjectsList, setSubjectsList] = useState<Subject[] | null>(null);
+  const [classId, setClassId] = useState("");
   const [subjectName, setSubjectName] = useState("");
+  const [topicOptions, setTopicOptions] = useState<string[]>([]);
+  const [topic, setTopic] = useState("");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -491,15 +192,73 @@ function QuestionsTab() {
   const [addingDocumentId, setAddingDocumentId] = useState<string | null>(null);
   const [addDraft, setAddDraft] = useState<QuestionDraft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [cursorHistory, setCursorHistory] = useState<(string | undefined)[]>([]);
+  const { requestConfirm, dialog } = useConfirm();
 
-  function load() {
+  function load(pageCursor: string | undefined) {
     setError(null);
-    getAdminQuestions({ subjectName: subjectName.trim() || undefined, search: search.trim() || undefined, limit: 50 })
-      .then((res) => setRows(res.questions))
+    getAdminQuestions({
+      classId: classId || undefined,
+      subjectName: subjectName.trim() || undefined,
+      topic: topic || undefined,
+      search: search.trim() || undefined,
+      limit: QUESTIONS_PAGE_SIZE,
+      cursor: pageCursor,
+    })
+      .then((res) => {
+        setRows(res.questions);
+        setNextCursor(res.nextCursor);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load questions"));
   }
 
-  useEffect(load, []);
+  function resetAndLoad() {
+    setCursorHistory([]);
+    setCursor(undefined);
+    load(undefined);
+  }
+
+  useEffect(() => {
+    Promise.all([getClasses(), getSubjects()])
+      .then(([c, s]) => {
+        setClasses(c);
+        setSubjectsList(s);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load classes/subjects"));
+  }, []);
+
+  // Repopulate the topic dropdown whenever class or subject changes -
+  // narrowing either one can make the previously-selected topic no
+  // longer exist for this combination, so it's cleared rather than left
+  // pointing at a topic that would silently match nothing.
+  useEffect(() => {
+    getTopics({ classId: classId || undefined, subjectName: subjectName.trim() || undefined })
+      .then((opts) => {
+        setTopicOptions(opts);
+        setTopic((current) => (opts.includes(current) ? current : ""));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load topics"));
+  }, [classId, subjectName]);
+
+  function goNext() {
+    if (!nextCursor) return;
+    setCursorHistory((h) => [...h, cursor]);
+    setCursor(nextCursor);
+    load(nextCursor);
+  }
+
+  function goPrev() {
+    setCursorHistory((h) => {
+      const prev = h[h.length - 1];
+      setCursor(prev);
+      load(prev);
+      return h.slice(0, -1);
+    });
+  }
+
+  useEffect(() => load(undefined), []);
 
   // No document-picker endpoint yet - "add question" attaches to a
   // document that already has at least one question, chosen from what's
@@ -523,7 +282,7 @@ function QuestionsTab() {
       await updateAdminQuestion(editingId, draftToWriteInput(editDraft));
       setEditingId(null);
       setEditDraft(null);
-      load();
+      load(cursor);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save question");
     } finally {
@@ -536,7 +295,7 @@ function QuestionsTab() {
     setError(null);
     try {
       await deleteAdminQuestion(id);
-      load();
+      load(cursor);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete question");
     } finally {
@@ -552,7 +311,7 @@ function QuestionsTab() {
       await createAdminQuestion(draftToWriteInput(addDraft, addingDocumentId));
       setAddingDocumentId(null);
       setAddDraft(null);
-      load();
+      load(cursor);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create question");
     } finally {
@@ -562,20 +321,42 @@ function QuestionsTab() {
 
   return (
     <div>
+      {dialog}
       <div className="mb-4 flex flex-wrap gap-2">
-        <input
-          value={subjectName}
-          onChange={(e) => setSubjectName(e.target.value)}
-          placeholder="Filter by subject"
-          className={inputClass}
-        />
+        <select value={classId} onChange={(e) => setClassId(e.target.value)} className={inputClass}>
+          <option value="">All classes</option>
+          {classes?.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <select value={subjectName} onChange={(e) => setSubjectName(e.target.value)} className={inputClass}>
+          <option value="">All subjects</option>
+          {subjectsList?.map((s) => (
+            <option key={s.id} value={s.name}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <select value={topic} onChange={(e) => setTopic(e.target.value)} className={inputClass}>
+          <option value="">All topics</option>
+          {topicOptions.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") resetAndLoad();
+          }}
           placeholder="Search question text"
           className={inputClass}
         />
-        <Button size="sm" variant="secondary" onClick={load}>
+        <Button size="sm" variant="secondary" onClick={resetAndLoad}>
           Search
         </Button>
         {documentOptions.length > 0 && !addingDocumentId && (
@@ -672,9 +453,7 @@ function QuestionsTab() {
                     size="sm"
                     variant="secondary"
                     className="text-destructive"
-                    onClick={() => {
-                      if (window.confirm("Delete this question? This can't be undone.")) handleDelete(q.id);
-                    }}
+                    onClick={() => requestConfirm("Delete this question? This can't be undone.", () => handleDelete(q.id))}
                     disabled={busy}
                   >
                     Delete
@@ -685,6 +464,18 @@ function QuestionsTab() {
           )
         )}
       </div>
+
+      {rows !== null && rows.length > 0 && (
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <Button size="sm" variant="secondary" onClick={goPrev} disabled={cursorHistory.length === 0}>
+            Previous
+          </Button>
+          <span className="text-xs text-muted-foreground">Page {cursorHistory.length + 1}</span>
+          <Button size="sm" variant="secondary" onClick={goNext} disabled={!nextCursor}>
+            Next
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -773,6 +564,7 @@ function TopicsTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TopicDraft | null>(null);
   const [addDraft, setAddDraft] = useState<TopicDraft | null>(null);
+  const { requestConfirm, dialog } = useConfirm();
 
   function load() {
     setError(null);
@@ -856,22 +648,24 @@ function TopicsTab() {
     }
   }
 
-  async function handleDelete(id: string, name: string) {
-    if (!window.confirm(`Delete topic "${name}"? This can't be undone.`)) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteAdminTopic(id);
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete topic");
-    } finally {
-      setBusy(false);
-    }
+  function handleDelete(id: string, name: string) {
+    requestConfirm(`Delete topic "${name}"? This can't be undone.`, async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        await deleteAdminTopic(id);
+        load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to delete topic");
+      } finally {
+        setBusy(false);
+      }
+    });
   }
 
   return (
     <div>
+      {dialog}
       <div className="mb-4 rounded-xl border border-border bg-card p-4">
         <p className="mb-2 text-sm font-semibold">Add a subject</p>
         <div className="flex gap-2">
@@ -985,7 +779,9 @@ function StudyBuddyInsightsPanel({ profileId, profileName }: { profileId: string
   const [data, setData] = useState<TutorInsightsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const { requestConfirm, dialog } = useConfirm();
 
   function load() {
     setError(null);
@@ -1014,6 +810,27 @@ function StudyBuddyInsightsPanel({ profileId, profileName }: { profileId: string
     }
   }
 
+  // Added 10 September 2026 after a live click-through turned up stale
+  // rows from an early prototype of this feature - lets an admin wipe
+  // them out directly rather than waiting on a valid GEMINI_API_KEY to
+  // regenerate (which upserts per-topic, so a topic that's gone quiet
+  // never gets its stale row overwritten).
+  function handleClear() {
+    requestConfirm(`Clear all stored Study Buddy insights for ${profileName}? This can't be undone.`, async () => {
+      setClearing(true);
+      setError(null);
+      setNotice(null);
+      try {
+        await clearTutorInsights(profileId);
+        load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to clear insights");
+      } finally {
+        setClearing(false);
+      }
+    });
+  }
+
   if (error) return <p className="text-sm font-medium text-destructive">{error}</p>;
   if (data === null) return <p className="text-sm text-muted-foreground">Loading Study Buddy insights...</p>;
 
@@ -1021,14 +838,22 @@ function StudyBuddyInsightsPanel({ profileId, profileName }: { profileId: string
 
   return (
     <div>
+      {dialog}
       <div className="mb-3 flex items-start justify-between gap-3">
         <p className="m-0 text-sm text-muted-foreground">
           Last 30 days: {breakdown.totalAgentReplies} Study Buddy repl{breakdown.totalAgentReplies === 1 ? "y" : "ies"}
           {breakdown.ungroundedCount > 0 ? `, ${breakdown.ungroundedCount} with no matching lesson content` : ""}.
         </p>
-        <Button size="sm" variant="secondary" onClick={handleGenerate} disabled={generating}>
-          {generating ? "Generating..." : "Generate insights"}
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          {data.insights.length > 0 && (
+            <Button size="sm" variant="secondary" className="text-destructive" onClick={handleClear} disabled={clearing}>
+              {clearing ? "Clearing..." : "Clear"}
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={handleGenerate} disabled={generating}>
+            {generating ? "Generating..." : "Generate insights"}
+          </Button>
+        </div>
       </div>
 
       {notice && <p className="mb-3 text-sm text-muted-foreground italic">{notice}</p>}
@@ -1062,13 +887,59 @@ function StudyBuddyInsightsPanel({ profileId, profileName }: { profileId: string
   );
 }
 
+// Looks up the avatar image the same way Leaderboard.tsx does (shared
+// list in ../avatars.ts) - falls back to the old generic per-title image
+// for profiles created before avatar choice existed.
+function usersTabAvatarSrc(avatarId: string | null, title: string | null): string {
+  return avatarFile(avatarId) ?? (title === "Princess" ? "/princess.png" : "/prince.png");
+}
+
+// Same red/gold/emerald accuracy tiering as ParentDashboard.tsx's
+// accuracyTint - kept as its own small local copy rather than a shared
+// import, matching this file's existing convention of each
+// section/screen owning its own tiny formatting helpers.
+function usersTabAccuracyTint(accuracy: number | null): string {
+  if (accuracy === null) return "bg-muted-foreground";
+  if (accuracy < 0.5) return "bg-ruby";
+  if (accuracy < 0.75) return "bg-primary";
+  return "bg-emerald";
+}
+
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(ms / 86_400_000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// Redesigned 10 September 2026 (the plain table felt too bare for a
+// roster this central) - stat tiles up top for an at-a-glance read on
+// the whole player base, then one card per player (avatar, badges, an
+// accuracy bar) instead of a spreadsheet row, matching the card language
+// QuestionsTab/TopicsTab already use elsewhere in this file and the
+// stat-tile pattern ParentDashboard.tsx established for the same
+// AdminUserSummary data. Search is plain client-side filtering (the
+// roster is one unpaginated GET /admin/users call, unlike Questions'
+// paginated list) rather than another round trip.
+const USERS_PAGE_SIZE = 10;
+
 function UsersTab() {
   const [rows, setRows] = useState<AdminUserSummary[] | null>(null);
+  const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   // Which profile's Study Buddy panel is open, if any - only one at a
   // time, and its own component (above) handles its own data fetching.
   const [expandedProfileId, setExpandedProfileId] = useState<string | null>(null);
+  // Client-side pagination, 10 per page - the whole roster already loads
+  // in one GET /admin/users call (unlike Questions, which is server-
+  // paginated), so paging just slices what's already in memory. 1-based
+  // to match the "Page N" label shown next to Prev/Next.
+  const { requestConfirm, dialog } = useConfirm();
+  const [page, setPage] = useState(1);
 
   function load() {
     getAdminUsers()
@@ -1078,79 +949,227 @@ function UsersTab() {
 
   useEffect(load, []);
 
-  async function handleResetPin(profileId: string, name: string) {
-    if (!window.confirm(`Reset ${name}'s PIN? They'll be asked to choose a new one next time they enter their name.`)) return;
-    setResettingId(profileId);
-    setError(null);
-    try {
-      await resetProfilePin(profileId);
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to reset PIN");
-    } finally {
-      setResettingId(null);
-    }
+  function handleResetPin(profileId: string, name: string) {
+    requestConfirm(`Reset ${name}'s PIN? They'll be asked to choose a new one next time they enter their name.`, async () => {
+      setResettingId(profileId);
+      setError(null);
+      try {
+        await resetProfilePin(profileId);
+        load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to reset PIN");
+      } finally {
+        setResettingId(null);
+      }
+    });
   }
+
+  function handleDeleteUser(profileId: string, name: string) {
+    requestConfirm(
+      `Permanently delete ${name}? This removes their profile and every quiz, Study Buddy chat, and game they've played. This can't be undone.`,
+      async () => {
+        setDeletingId(profileId);
+        setError(null);
+        try {
+          await deleteAdminUser(profileId);
+          if (expandedProfileId === profileId) setExpandedProfileId(null);
+          load();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Failed to delete profile");
+        } finally {
+          setDeletingId(null);
+        }
+      }
+    );
+  }
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q || !rows) return rows;
+    return rows.filter((r) => r.name.toLowerCase().includes(q));
+  }, [rows, search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, rows]);
+
+  const totalPages = filteredRows ? Math.max(1, Math.ceil(filteredRows.length / USERS_PAGE_SIZE)) : 1;
+  const pagedRows = filteredRows?.slice((page - 1) * USERS_PAGE_SIZE, page * USERS_PAGE_SIZE);
+
+  const stats = useMemo(() => {
+    if (!rows || rows.length === 0) return null;
+    const withAccuracy = rows.filter((r) => r.accuracy !== null);
+    const weekAgo = Date.now() - 7 * 86_400_000;
+    return {
+      totalPlayers: rows.length,
+      totalQuizzes: rows.reduce((sum, r) => sum + r.quizzesPlayed, 0),
+      avgAccuracy:
+        withAccuracy.length > 0 ? withAccuracy.reduce((sum, r) => sum + (r.accuracy ?? 0), 0) / withAccuracy.length : null,
+      activeThisWeek: rows.filter((r) => r.lastActive && new Date(r.lastActive).getTime() >= weekAgo).length,
+    };
+  }, [rows]);
 
   if (error) return <p className="text-sm font-medium text-destructive">{error}</p>;
   if (rows === null) return <p className="text-sm text-muted-foreground">Loading...</p>;
   if (rows.length === 0) return <p className="text-sm text-muted-foreground">No players yet.</p>;
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
-      <table className="w-full text-sm">
-        <thead className="bg-secondary/60 text-left text-muted-foreground">
-          <tr>
-            <th className="px-4 py-2 font-semibold">Name</th>
-            <th className="px-4 py-2 font-semibold">Title</th>
-            <th className="px-4 py-2 font-semibold">PIN</th>
-            <th className="px-4 py-2 font-semibold">Quizzes</th>
-            <th className="px-4 py-2 font-semibold">Stages cleared</th>
-            <th className="px-4 py-2 font-semibold">Accuracy</th>
-            <th className="px-4 py-2 font-semibold">Last active</th>
-            <th className="px-4 py-2" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {rows.map((r) => (
-            <Fragment key={r.profileId}>
-              <tr>
-                <td className="px-4 py-3 font-semibold">{r.name}</td>
-                <td className="px-4 py-3">{r.title ?? "–"}</td>
-                <td className="px-4 py-3">{r.hasPin ? "Set" : "Not set yet"}</td>
-                <td className="px-4 py-3">{r.quizzesPlayed}</td>
-                <td className="px-4 py-3">{r.stagesCleared}</td>
-                <td className="px-4 py-3">{r.accuracy !== null ? `${Math.round(r.accuracy * 100)}%` : "–"}</td>
-                <td className="px-4 py-3">{r.lastActive ? new Date(r.lastActive).toLocaleDateString() : "–"}</td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <button
-                    onClick={() => setExpandedProfileId(expandedProfileId === r.profileId ? null : r.profileId)}
-                    className="mr-3 text-sm font-semibold text-primary hover:underline"
-                  >
-                    {expandedProfileId === r.profileId ? "Hide Study Buddy" : "Study Buddy"}
-                  </button>
-                  {r.hasPin && (
-                    <button
-                      onClick={() => handleResetPin(r.profileId, r.name)}
-                      disabled={resettingId === r.profileId}
-                      className="text-sm font-semibold text-destructive hover:underline"
-                    >
-                      {resettingId === r.profileId ? "Resetting..." : "Reset PIN"}
-                    </button>
-                  )}
-                </td>
-              </tr>
-              {expandedProfileId === r.profileId && (
-                <tr>
-                  <td colSpan={8} className="px-4 pb-4">
-                    <StudyBuddyInsightsPanel profileId={r.profileId} profileName={r.name} />
-                  </td>
-                </tr>
-              )}
-            </Fragment>
+    <div>
+      {dialog}
+      {stats && (
+        <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { icon: Users, label: "Players", value: `${stats.totalPlayers}` },
+            { icon: TrendingUp, label: "Quizzes played", value: `${stats.totalQuizzes}` },
+            {
+              icon: Target,
+              label: "Average accuracy",
+              value: stats.avgAccuracy !== null ? `${Math.round(stats.avgAccuracy * 100)}%` : "–",
+            },
+            { icon: Sparkles, label: "Active this week", value: `${stats.activeThisWeek}` },
+          ].map((s) => (
+            <div key={s.label} className="rounded-2xl border border-border bg-card p-5">
+              <s.icon className="size-5 text-primary" />
+              <p className="mt-3 text-3xl font-display font-extrabold">{s.value}</p>
+              <p className="text-sm text-muted-foreground">{s.label}</p>
+            </div>
           ))}
-        </tbody>
-      </table>
+        </section>
+      )}
+
+      <div className="relative mb-4 max-w-xs">
+        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search players by name"
+          className={`${inputClass} w-full pl-9`}
+        />
+      </div>
+
+      {filteredRows && filteredRows.length === 0 && (
+        <p className="text-sm text-muted-foreground">No players match &ldquo;{search}&rdquo;.</p>
+      )}
+
+      <div className="space-y-3">
+        {pagedRows?.map((r) => (
+          <div key={r.profileId} className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <img
+                  src={usersTabAvatarSrc(r.avatarId, r.title)}
+                  alt=""
+                  className="size-14 shrink-0 rounded-xl border-2 border-border bg-secondary object-cover"
+                />
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-display text-lg font-bold">{r.name}</p>
+                    {r.title && (
+                      <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-semibold text-secondary-foreground">
+                        {r.title}
+                      </span>
+                    )}
+                    {r.quizzesPlayed === 0 && (
+                      <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-semibold text-primary">New</span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <Key className="size-3.5" />
+                      {r.hasPin ? "PIN set" : "No PIN yet"}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <CalendarClock className="size-3.5" />
+                      {r.lastActive ? `Active ${timeAgo(r.lastActive)}` : "Never played"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant={expandedProfileId === r.profileId ? "default" : "secondary"}
+                  onClick={() => setExpandedProfileId(expandedProfileId === r.profileId ? null : r.profileId)}
+                >
+                  <MessageCircle className="size-4" />
+                  Study Buddy
+                </Button>
+                {r.hasPin && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="text-destructive"
+                    onClick={() => handleResetPin(r.profileId, r.name)}
+                    disabled={resettingId === r.profileId}
+                  >
+                    <Key className="size-4" />
+                    {resettingId === r.profileId ? "Resetting..." : "Reset PIN"}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => handleDeleteUser(r.profileId, r.name)}
+                  disabled={deletingId === r.profileId}
+                >
+                  <Trash2 className="size-4" />
+                  {deletingId === r.profileId ? "Deleting..." : "Delete"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div>
+                <p className="text-lg font-display font-bold">{r.quizzesPlayed}</p>
+                <p className="text-xs text-muted-foreground">Quizzes played</p>
+              </div>
+              <div>
+                <p className="text-lg font-display font-bold">{r.stagesCleared}</p>
+                <p className="text-xs text-muted-foreground">Stages cleared</p>
+              </div>
+              <div>
+                <p className="text-lg font-display font-bold">{r.questionsAnswered}</p>
+                <p className="text-xs text-muted-foreground">Questions answered</p>
+              </div>
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <p className="text-lg font-display font-bold">
+                    {r.accuracy !== null ? `${Math.round(r.accuracy * 100)}%` : "–"}
+                  </p>
+                </div>
+                <p className="mb-1.5 text-xs text-muted-foreground">Accuracy</p>
+                <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className={`h-full rounded-full ${usersTabAccuracyTint(r.accuracy)}`}
+                    style={{ width: `${r.accuracy === null ? 0 : Math.round(r.accuracy * 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {expandedProfileId === r.profileId && (
+              <div className="mt-4 border-t border-border pt-4">
+                <StudyBuddyInsightsPanel profileId={r.profileId} profileName={r.name} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {filteredRows && filteredRows.length > USERS_PAGE_SIZE && (
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <Button size="sm" variant="secondary" onClick={() => setPage((p) => p - 1)} disabled={page <= 1}>
+            Previous
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Page {page} of {totalPages}
+          </span>
+          <Button size="sm" variant="secondary" onClick={() => setPage((p) => p + 1)} disabled={page >= totalPages}>
+            Next
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1162,14 +1181,14 @@ function UsersTab() {
 // independent concerns sharing one tab purely because both are
 // admin-only Study Buddy housekeeping, not because they interact.
 function StudyBuddySettingsPanel() {
-  const [settings, setSettings] = useState<TutorSettings | null>(null);
-  const [draft, setDraft] = useState<TutorSettings | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [draft, setDraft] = useState<AppSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   function load() {
-    getTutorSettings()
+    getAppSettings()
       .then((s) => {
         setSettings(s);
         setDraft(s);
@@ -1185,7 +1204,7 @@ function StudyBuddySettingsPanel() {
     setError(null);
     setSaved(false);
     try {
-      const updated = await updateTutorSettings(draft);
+      const updated = await updateAppSettings(draft);
       setSettings(updated);
       setDraft(updated);
       setSaved(true);
@@ -1407,12 +1426,188 @@ function StudyBuddyTab() {
   );
 }
 
+// One row for one on/off flag - shared by the Study Buddy/Arcade master
+// switches and the 5 per-game toggles below, so every row lines up the
+// same way whether or not it's indented under a parent.
+function FlagRow({
+  checked,
+  onChange,
+  label,
+  description,
+  disabled,
+  indent,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  indent?: boolean;
+}) {
+  return (
+    <label className={`mb-3 flex items-start gap-2.5 last:mb-0 ${disabled ? "opacity-50" : "cursor-pointer"} ${indent ? "ml-7" : ""}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5"
+      />
+      <span>
+        <span className="block font-medium">
+          {label} {checked ? "on" : "off"}
+        </span>
+        {description && <span className="block text-sm text-muted-foreground">{description}</span>}
+      </span>
+    </label>
+  );
+}
+
+// Flag-based feature management (migration 0023, admin request 10
+// September 2026): one place to turn any optional feature on/off for
+// every player at once, no code change needed. Reuses the exact same
+// app_settings singleton and GET/PATCH /admin/settings round trip
+// StudyBuddySettingsPanel above already established - this panel just
+// surfaces a different subset of the same row (the on/off switches,
+// not the caps/resource-access settings, which stay in the Study Buddy
+// tab where they've always lived). The 5 game rows are ANDed with the
+// Arcade master switch on the backend (games.ts's isGameEnabled) - shown
+// disabled-but-still-checked here when Arcade itself is off, so turning
+// Arcade back on doesn't silently un-toggle a game an admin had
+// deliberately left on.
+function FeaturesTab() {
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [draft, setDraft] = useState<AppSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    getAppSettings()
+      .then((s) => {
+        setSettings(s);
+        setDraft(s);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load settings"));
+  }, []);
+
+  async function handleSave() {
+    if (!draft) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const updated = await updateAppSettings(draft);
+      setSettings(updated);
+      setDraft(updated);
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (error) return <p className="text-sm font-medium text-destructive">{error}</p>;
+  if (draft === null) return <p className="text-sm text-muted-foreground">Loading settings...</p>;
+
+  const dirty = settings !== null && JSON.stringify(settings) !== JSON.stringify(draft);
+
+  return (
+    <div>
+      <h2 className="mb-1 text-lg">Features</h2>
+      <p className="mb-4 max-w-xl text-sm text-muted-foreground">
+        Turn any of these off to hide the feature for every player right away - the button or menu entry
+        disappears from the app, not just an error message if they try it.
+      </p>
+
+      <div className="max-w-[480px] rounded-xl border border-border bg-card p-4">
+        <div className="mb-4 flex items-center gap-2 border-b border-border pb-4">
+          <Bird className="size-5 shrink-0 text-primary" />
+          <div className="flex-1">
+            <FlagRow
+              checked={draft.tutorEnabled}
+              onChange={(v) => setDraft({ ...draft, tutorEnabled: v })}
+              label="Study Buddy"
+              description="The whole Ask Sage / chat feature, including riddles and jokes below."
+            />
+          </div>
+        </div>
+
+        <div className="mb-4 border-b border-border pb-4">
+          <FlagRow
+            checked={draft.tutorFunContentEnabled}
+            onChange={(v) => setDraft({ ...draft, tutorFunContentEnabled: v })}
+            label="Riddles, jokes & fun content"
+            description="The riddle/joke/tongue-twister/trivia quick chips inside Study Buddy chat."
+          />
+        </div>
+
+        <div className="flex items-start gap-2 border-b border-border pb-2">
+          <Gamepad2 className="mt-0.5 size-5 shrink-0 text-primary" />
+          <div className="flex-1">
+            <FlagRow
+              checked={draft.arcadeEnabled}
+              onChange={(v) => setDraft({ ...draft, arcadeEnabled: v })}
+              label="Arcade"
+              description="Quick-fire practice games - turning this off hides all 5 games at once."
+            />
+            <FlagRow
+              checked={draft.gameSpellingSprintEnabled}
+              onChange={(v) => setDraft({ ...draft, gameSpellingSprintEnabled: v })}
+              label="Spelling Sprint"
+              disabled={!draft.arcadeEnabled}
+              indent
+            />
+            <FlagRow
+              checked={draft.gameMissingLettersEnabled}
+              onChange={(v) => setDraft({ ...draft, gameMissingLettersEnabled: v })}
+              label="Missing Letters"
+              disabled={!draft.arcadeEnabled}
+              indent
+            />
+            <FlagRow
+              checked={draft.gameWordMeaningMatchEnabled}
+              onChange={(v) => setDraft({ ...draft, gameWordMeaningMatchEnabled: v })}
+              label="Word Meaning Match"
+              disabled={!draft.arcadeEnabled}
+              indent
+            />
+            <FlagRow
+              checked={draft.gameHomophoneHunterEnabled}
+              onChange={(v) => setDraft({ ...draft, gameHomophoneHunterEnabled: v })}
+              label="Homophone Hunter"
+              disabled={!draft.arcadeEnabled}
+              indent
+            />
+            <FlagRow
+              checked={draft.gamePrefixSuffixBuilderEnabled}
+              onChange={(v) => setDraft({ ...draft, gamePrefixSuffixBuilderEnabled: v })}
+              label="Prefix/Suffix Builder"
+              disabled={!draft.arcadeEnabled}
+              indent
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <Button size="sm" onClick={handleSave} disabled={saving || !dirty}>
+            {saving ? "Saving..." : "Save"}
+          </Button>
+          {saved && !dirty && <span className="text-sm text-muted-foreground">Saved.</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TABS: { key: Tab; label: string; icon: typeof Bird }[] = [
   { key: "questions", label: "Questions", icon: FileUp },
   { key: "topics", label: "Topics", icon: LayoutGrid },
   { key: "users", label: "Users", icon: Users },
   { key: "content", label: "Add content", icon: FileUp },
   { key: "studyBuddy", label: "Study Buddy", icon: Settings2 },
+  { key: "features", label: "Features", icon: ToggleLeft },
 ];
 
 // Admin control center: question management, the user roster, and content
@@ -1460,6 +1655,7 @@ export function AdminDashboard({ admin, onLogOut }: { admin: AdminUser; onLogOut
           {tab === "users" && <UsersTab />}
           {tab === "content" && <Upload />}
           {tab === "studyBuddy" && <StudyBuddyTab />}
+          {tab === "features" && <FeaturesTab />}
         </div>
       </div>
     </div>

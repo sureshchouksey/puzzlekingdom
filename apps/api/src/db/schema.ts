@@ -78,6 +78,17 @@ export const profiles = pgTable("profiles", {
   // hasn't finished onboarding yet); an admin can null it out again via
   // the "reset PIN" action to recover a forgotten one.
   pinHash: text("pin_hash"),
+  // Which family this profile belongs to (Track 7, migration 0024) -
+  // nullable: existing profiles predate families and keep working with no
+  // family until a one-time backfill script adopts them, rather than this
+  // migration retrofitting them. New sign-ups under the family flow
+  // always set this at creation time.
+  familyId: uuid("family_id").references(() => families.id),
+  // Free text (e.g. "Year 3") - only set for profiles created via the new
+  // family sign-up flow (migration 0024), per the Children's Code
+  // data-minimization decision to use nickname + year group instead of a
+  // real name for new sign-ups. Null for every pre-existing profile.
+  yearGroup: text("year_group"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -89,6 +100,33 @@ export const admins = pgTable("admins", {
   id: uuid("id").primaryKey().defaultRandom(),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// A family/household tenant (Track 7, migration 0024) - the boundary a
+// future public sign-up creates around its own kids' profiles. Deliberately
+// separate from `admins`: an admin is a platform-wide curator/support role,
+// a family is a household that only ever sees its own data. `name` is a
+// free-text household label (e.g. "The Chouksey Family") set at signup,
+// not used for auth.
+export const families = pgTable("families", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// A parent/guardian login for a family - one-to-many against `families`
+// (multiple owners per family from day one, per the confirmed decision),
+// keyed by email and scoped to one family via familyId. See
+// routes/families.ts. Authenticates with a 4-digit PIN (bcrypt-hashed),
+// same as a child profile's own pinHash below - not a full password
+// (migration 0025, switched from an initial password design the same
+// day, per direct user instruction after trying the live flow).
+export const familyOwners = pgTable("family_owners", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  familyId: uuid("family_id").notNull().references(() => families.id, { onDelete: "cascade" }),
+  email: text("email").notNull().unique(),
+  pinHash: text("pin_hash").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -265,11 +303,21 @@ export const subjectsRelations = relations(subjects, ({ many }) => ({
   topics: many(topics),
 }));
 
-export const profilesRelations = relations(profiles, ({ many }) => ({
+export const profilesRelations = relations(profiles, ({ one, many }) => ({
+  family: one(families, { fields: [profiles.familyId], references: [families.id] }),
   attempts: many(quizAttempts),
   tutorConversations: many(tutorConversations),
   tutorGrowthInsights: many(tutorGrowthInsights),
   gameAttempts: many(gameAttempts),
+}));
+
+export const familiesRelations = relations(families, ({ many }) => ({
+  owners: many(familyOwners),
+  profiles: many(profiles),
+}));
+
+export const familyOwnersRelations = relations(familyOwners, ({ one }) => ({
+  family: one(families, { fields: [familyOwners.familyId], references: [families.id] }),
 }));
 
 export const documentsRelations = relations(documents, ({ one, many }) => ({
@@ -325,6 +373,20 @@ export const appSettings = pgTable("app_settings", {
   tutorUseConceptGuides: boolean("tutor_use_concept_guides").notNull().default(true),
   tutorUseCache: boolean("tutor_use_cache").notNull().default(true),
   tutorUseGemini: boolean("tutor_use_gemini").notNull().default(true),
+  // Flag-based feature management (migration 0023) - the Arcade's master
+  // switch, one on/off column per Arcade game, and a separate switch for
+  // Study Buddy's riddle/joke/tongue-twister/trivia "fun content" bank
+  // (distinct from tutorEnabled, which is Study Buddy's own all-or-
+  // nothing kill switch). See routes/admin.ts's GET /features for how
+  // these get summarized for the kid-facing app, and routes/games.ts /
+  // routes/tutor.ts for where they're actually enforced.
+  arcadeEnabled: boolean("arcade_enabled").notNull().default(true),
+  gameSpellingSprintEnabled: boolean("game_spelling_sprint_enabled").notNull().default(true),
+  gameMissingLettersEnabled: boolean("game_missing_letters_enabled").notNull().default(true),
+  gameWordMeaningMatchEnabled: boolean("game_word_meaning_match_enabled").notNull().default(true),
+  gameHomophoneHunterEnabled: boolean("game_homophone_hunter_enabled").notNull().default(true),
+  gamePrefixSuffixBuilderEnabled: boolean("game_prefix_suffix_builder_enabled").notNull().default(true),
+  tutorFunContentEnabled: boolean("tutor_fun_content_enabled").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

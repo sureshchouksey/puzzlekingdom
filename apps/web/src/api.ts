@@ -9,12 +9,15 @@ import type {
   AiProvider,
   AssembleQuizResponse,
   AttemptReport,
+  FamilyLoginResponse,
+  FamilySignupResponse,
   EstimateResponse,
   GameKey,
   GameRoundResponse,
   GenerateResponse,
   LeaderboardEntry,
   PkClass,
+  Profile,
   ProfileLookupResponse,
   ProfileSessionResponse,
   QuizResults,
@@ -29,7 +32,8 @@ import type {
   TutorTranscript,
   TutorInsightsResponse,
   GenerateInsightsResponse,
-  TutorSettings,
+  AppSettings,
+  FeatureFlags,
   UploadDocumentResponse,
 } from "./types";
 
@@ -347,8 +351,91 @@ export function adminLogin(params: { username: string; password: string }): Prom
     });
 }
 
+// Track 7: family accounts. Creates a family + its first owner (+
+// optionally a first child profile, nickname + year group per the
+// Children's Code decision) in one call, and logs the owner in - same
+// "store the token itself" convention as adminLogin.
+export function familySignup(params: {
+  familyName?: string;
+  email: string;
+  pin: string;
+  childNickname?: string;
+  childYearGroup?: string;
+  childTitle?: string;
+  childAvatarId?: string;
+}): Promise<FamilySignupResponse> {
+  return apiFetch(`/families/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  })
+    .then((res) => asJson<FamilySignupResponse>(res))
+    .then((data) => {
+      setAuthToken(data.token);
+      return data;
+    });
+}
+
+// Bootstraps a brand-new child's PIN from the family-owner flow
+// (FamilyDashboard.tsx's "add a child" step) - same endpoint as
+// setProfilePin above, but deliberately does NOT store the returned
+// token as the active session. There's only one stored token slot (see
+// AUTH_TOKEN_STORAGE_KEY's own comment) - calling the token-storing
+// setProfilePin here would silently log the family owner out of their
+// own session the moment they finish adding a child. The family owner
+// stays logged in; a child's own token is only ever stored when they
+// explicitly log in via verifyProfilePin (the "Play" step).
+export function bootstrapChildPin(profileId: string, params: { pin: string }): Promise<Profile> {
+  return apiFetch(`/profiles/${profileId}/set-pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  })
+    .then((res) => asJson<ProfileSessionResponse>(res))
+    .then((data) => data.profile);
+}
+
+export function familyLogin(params: { email: string; pin: string }): Promise<FamilyLoginResponse> {
+  return apiFetch(`/families/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  })
+    .then((res) => asJson<FamilyLoginResponse>(res))
+    .then((data) => {
+      setAuthToken(data.token);
+      return data;
+    });
+}
+
+// Every child profile belonging to the logged-in family owner's own
+// family - never another family's, regardless of what's asked for (the
+// server derives the filter from the caller's own token).
+export function getFamilyProfiles(): Promise<Profile[]> {
+  return apiFetch(`/families/me/profiles`)
+    .then((res) => asJson<{ profiles: Profile[] }>(res))
+    .then((r) => r.profiles);
+}
+
+// Adds a new child profile to the logged-in owner's family. Returns
+// hasPin: false always (brand new) - the caller follows up with the
+// existing setProfilePin(profileId, ...) to give the child a real PIN,
+// same as Welcome.tsx's own newTitle -> setPin step.
+export function addFamilyProfile(params: {
+  nickname: string;
+  yearGroup?: string;
+  title?: string;
+  avatarId?: string;
+}): Promise<Profile & { hasPin: boolean }> {
+  return apiFetch(`/families/me/profiles`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  }).then((res) => asJson(res));
+}
+
 export function getAdminQuestions(
-  params: { subjectName?: string; classId?: string; search?: string; limit?: number; cursor?: string } = {}
+  params: { subjectName?: string; classId?: string; topic?: string; search?: string; limit?: number; cursor?: string } = {}
 ): Promise<AdminQuestionsResponse> {
   return apiFetch(`/admin/questions${buildQuery(params)}`).then((res) => asJson(res));
 }
@@ -380,6 +467,18 @@ export async function deleteAdminQuestion(id: string): Promise<void> {
 
 export function getAdminUsers(): Promise<AdminUserSummary[]> {
   return apiFetch(`/admin/users`).then((res) => asJson(res));
+}
+
+// Full, irreversible hard delete of a profile and everything tied to it
+// (quiz history, Study Buddy conversations, game history) - see
+// DELETE /admin/users/:profileId in admin.ts for exactly what's removed.
+export async function deleteAdminUser(profileId: string): Promise<void> {
+  const res = await apiFetch(`/admin/users/${profileId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const message = typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : res.statusText;
+    throw new Error(message);
+  }
 }
 
 // Topics (schema.ts's topics table) - class+subject scoped, ordered, with
@@ -485,21 +584,42 @@ export function generateTutorInsights(profileId: string): Promise<GenerateInsigh
   return apiFetch(`/admin/users/${profileId}/tutor-insights/generate`, { method: "POST" }).then((res) => asJson(res));
 }
 
-// The Study Buddy on/off toggle + caps (Section 10 step 9) - reads/writes
-// the same app_settings singleton tutorBudget.ts checks on every chat
-// turn. updateTutorSettings sends whichever fields the settings form
-// currently holds - PATCH merges onto the existing row either way, so
-// sending all three every save is simplest and still correct.
-export function getTutorSettings(): Promise<TutorSettings> {
+// Wipes a profile's stored insights outright - see the backend route's
+// own comment for why this exists (stale rows from an early version of
+// the feature that regenerating alone can't clean up).
+export function clearTutorInsights(profileId: string): Promise<void> {
+  return apiFetch(`/admin/users/${profileId}/tutor-insights`, { method: "DELETE" }).then((res) => {
+    if (!res.ok) throw new Error("Failed to clear insights");
+  });
+}
+
+// The full admin settings singleton (Section 10 step 9, extended by
+// flag-based feature management) - reads/writes the same app_settings row
+// tutorBudget.ts checks on every chat turn and games.ts checks on every
+// Arcade round. updateAppSettings sends whichever fields the settings
+// form currently holds - PATCH merges onto the existing row either way,
+// so sending everything every save is simplest and still correct.
+export function getAppSettings(): Promise<AppSettings> {
   return apiFetch(`/admin/settings`).then((res) => asJson(res));
 }
 
-export function updateTutorSettings(patch: Partial<TutorSettings>): Promise<TutorSettings> {
+export function updateAppSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   return apiFetch(`/admin/settings`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   }).then((res) => asJson(res));
+}
+
+// The public, player-facing summary of those same flags (GET /features,
+// no login required) - what Home/SubjectPicker/StudyBuddy/Arcade each
+// fetch for themselves on mount to decide what to show. Deliberately
+// fails open (see each screen's own fallback default) rather than
+// hiding a feature just because this one request hiccupped - same
+// "never break the child-facing route" philosophy tutorGeneration.ts
+// uses server-side.
+export function getFeatures(): Promise<FeatureFlags> {
+  return apiFetch(`/features`).then((res) => asJson(res));
 }
 
 // A profile's own conversation list (admin override via ?profileId=) -

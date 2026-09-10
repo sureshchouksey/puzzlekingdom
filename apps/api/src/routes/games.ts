@@ -3,6 +3,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { subjects, questions, documents, gameAttempts } from "../db/schema.js";
 import { starsForPercent } from "../lib/scoring.js";
+import { getAppSettings, type AppSettings } from "../services/tutorBudget.js";
 
 const DEFAULT_ROUND_SIZE = 10;
 
@@ -34,6 +35,27 @@ const GAME_DEFINITIONS: Record<string, { questionTypes: QuestionTypeValue[]; top
   homophone_hunter: { questionTypes: ["mcq", "fill_blank"], topic: "Homophones" },
   prefix_suffix_builder: { questionTypes: ["fill_blank"], topic: "Prefixes & Suffixes" },
 };
+
+// Flag-based feature management (migration 0023) - which app_settings
+// column gates each individual game, checked together with the Arcade's
+// own arcadeEnabled master switch below. Kept as its own small lookup
+// (rather than baking the field name into GAME_DEFINITIONS) so the two
+// concerns - "what content does this game need" vs. "is this game turned
+// on" - stay separate, same reasoning question-shape.ts's extraction
+// followed for validation logic.
+const GAME_ENABLED_FIELD: Record<string, keyof AppSettings> = {
+  spelling_sprint: "gameSpellingSprintEnabled",
+  missing_letters: "gameMissingLettersEnabled",
+  word_meaning_match: "gameWordMeaningMatchEnabled",
+  homophone_hunter: "gameHomophoneHunterEnabled",
+  prefix_suffix_builder: "gamePrefixSuffixBuilderEnabled",
+};
+
+function isGameEnabled(settings: AppSettings, gameKey: string): boolean {
+  if (!settings.arcadeEnabled) return false;
+  const field = GAME_ENABLED_FIELD[gameKey];
+  return field ? Boolean(settings[field]) : true;
+}
 
 // Shared by GET /games/round and GET /games/available, so "does this game
 // have any matching content" and "assemble a round for it" always agree
@@ -71,6 +93,11 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!gameKey || !(gameKey in GAME_DEFINITIONS)) {
       return reply.status(400).send({ error: `game must be one of: ${Object.keys(GAME_DEFINITIONS).join(", ")}` });
     }
+    const settings = await getAppSettings();
+    if (!isGameEnabled(settings, gameKey)) {
+      return reply.status(403).send({ error: "This game isn't available right now. Ask a grown-up if you'd like to know more." });
+    }
+
     const definition = GAME_DEFINITIONS[gameKey];
     const { classId, subjectName } = request.query;
     const count = Math.min(Math.max(1, Number(request.query.count) || DEFAULT_ROUND_SIZE), 30);
@@ -149,8 +176,16 @@ export async function gameRoutes(app: FastifyInstance) {
       subjectId = subject.id;
     }
 
+    const settings = await getAppSettings();
+
     const results = await Promise.all(
       Object.entries(GAME_DEFINITIONS).map(async ([key, definition]) => {
+        // Flag-based feature management (migration 0023) - a disabled
+        // game is skipped entirely, without even running its content
+        // query, so it never appears in the Arcade menu (same effect as
+        // "no content for this game yet", just admin-controlled instead
+        // of content-driven).
+        if (!isGameEnabled(settings, key)) return null;
         const [row] = await db
           .select({ id: questions.id })
           .from(questions)

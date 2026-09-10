@@ -403,6 +403,23 @@ export async function tutorRoutes(app: FastifyInstance) {
         }
 
         if (intent.kind === "fun_request") {
+          // Flag-based feature management (migration 0023) - checked
+          // here rather than up front with isTutorEnabled(), since this
+          // toggle only turns off the playful riddle/joke/tongue-twister/
+          // trivia bank, not the rest of Study Buddy (real academic help
+          // stays on even with this off).
+          const settings = await getAppSettings();
+          if (!settings.tutorFunContentEnabled) {
+            const replyText = "Riddles and jokes are turned off right now - ask a grown-up if you'd like them back on!";
+            await recordSimpleTutorExchange({
+              conversationId: conversation.id,
+              studentMessage: message,
+              replyText,
+              sourceType: "social",
+            });
+            return reply.send({ mode: "template", reply: replyText });
+          }
+
           const item = await getRandomFunContent({ contentType: intent.contentType, subject: intent.subject });
           const replyText = item
             ? formatFunContentReply(item)

@@ -19,9 +19,10 @@ import {
   Star,
   Trophy,
 } from "lucide-react";
-import { assembleQuiz, getClassSubjects, getQuizInProgress, getTopicReports, getTopics, resumeQuiz } from "../api";
+import { assembleQuiz, getClassSubjects, getFeatures, getQuizInProgress, getTopicReports, getTopics, resumeQuiz } from "../api";
 import type {
   AssembleQuizResponse,
+  FeatureFlags,
   PkClass,
   Profile,
   QuestJourney,
@@ -36,15 +37,16 @@ import { Arcade } from "./Arcade";
 // resumable (see QuizInProgress below) - the "serious study" mode.
 const STAGE_SIZE = 10;
 
-// "Quest Journey" quizzes run one topic at a time as a single, un-staged
-// quiz - so we ask the backend for a stage bigger than any topic's
-// question bank could be. The API clamps stageSize to the actual question
-// count (Math.min(requested, picked.length)), which collapses totalStages
-// to exactly 1 no matter how many questions the topic has. A quest that's
-// abandoned before its one stage is submitted just stays "current" next
-// time (no partial credit to lose), so quests don't need the same
-// resume-by-attempt tracking Topic Practice does.
-const QUEST_STAGE_SIZE = 9999;
+// Updated 10 September 2026, at the user's explicit request: Quest
+// Journey used to run one topic at a time as a single, un-staged quiz
+// (stageSize 9999, collapsing totalStages to 1 no matter how big the
+// topic's question bank was) - a 32-question topic was one giant "Stage 1
+// of 1" instead of several "stage cleared" checkpoints. Now it stages
+// exactly like Topic Practice (same size, same resumability below), so a
+// topic quest and a practice quiz feel consistent - only the question
+// selection (whole topic vs subject-wide/mixed) still differs between the
+// two modes.
+const QUEST_STAGE_SIZE = STAGE_SIZE;
 
 // A topic counts as mastered at the same 70% bar Quiz.tsx uses to pass a
 // stage (STAGE_PASS_THRESHOLD on the backend) - "quest complete" here means
@@ -178,6 +180,28 @@ export function SubjectPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Flag-based feature management (migration 0023) - fetched fresh on
+  // every visit here, same self-fetching convention as everything else
+  // on this screen (subjects/topics/reports below). Defaults to
+  // everything on (fail open) while loading or if the request fails.
+  const [features, setFeatures] = useState<FeatureFlags>({
+    studyBuddyEnabled: true,
+    funContentEnabled: true,
+    arcadeEnabled: true,
+    games: {
+      spelling_sprint: true,
+      missing_letters: true,
+      word_meaning_match: true,
+      homophone_hunter: true,
+      prefix_suffix_builder: true,
+    },
+  });
+  useEffect(() => {
+    getFeatures()
+      .then(setFeatures)
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     getClassSubjects(pkClass.id)
       .then(setSubjects)
@@ -229,13 +253,28 @@ export function SubjectPicker({
     setLoading(true);
     setError(null);
     try {
-      const quiz = await assembleQuiz({
+      // Now multi-staged (see QUEST_STAGE_SIZE above), so a quest node
+      // can genuinely be left mid-way and picked back up later - same
+      // resume-then-fall-back-to-assemble pattern startPractice already
+      // uses below, just always attempted here rather than gated on a
+      // pre-fetched `inProgress` list (quest nodes don't currently fetch
+      // one - resumeQuiz itself 404s cleanly when there's nothing to
+      // resume for this topic, which the .catch below treats the same as
+      // "start fresh").
+      const quiz = await resumeQuiz({
+        profileId: profile.id,
         subjectName: item.subjectName,
         classId: pkClass.id,
         topic: item.topic,
-        profileId: profile.id,
-        stageSize: QUEST_STAGE_SIZE,
-      });
+      }).catch(() =>
+        assembleQuiz({
+          subjectName: item.subjectName,
+          classId: pkClass.id,
+          topic: item.topic,
+          profileId: profile.id,
+          stageSize: QUEST_STAGE_SIZE,
+        })
+      );
       onQuizReady(quiz, { pkClass, items, index });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start quest");
@@ -417,21 +456,23 @@ export function SubjectPicker({
                 </span>
               </button>
 
-              <button
-                onClick={() => setMode("games")}
-                style={{ animationDelay: "180ms" }}
-                className="animate-pop-in shadow-quest flex items-center gap-4 rounded-3xl border border-border/70 bg-card/85 p-6 text-left backdrop-blur transition-transform hover:-translate-y-1 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              >
-                <span className={`animate-float grid size-16 shrink-0 place-items-center rounded-full bg-secondary shadow-inner ${JEWEL_TEXT[jewel]}`}>
-                  <Gamepad2 className="size-8" />
-                </span>
-                <span className="flex-1">
-                  <span className="block text-xl font-display font-bold">Arcade</span>
-                  <span className="block text-sm text-muted-foreground">
-                    Quick-fire practice games - no stages, just a fast round and a streak.
+              {features.arcadeEnabled && (
+                <button
+                  onClick={() => setMode("games")}
+                  style={{ animationDelay: "180ms" }}
+                  className="animate-pop-in shadow-quest flex items-center gap-4 rounded-3xl border border-border/70 bg-card/85 p-6 text-left backdrop-blur transition-transform hover:-translate-y-1 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <span className={`animate-float grid size-16 shrink-0 place-items-center rounded-full bg-secondary shadow-inner ${JEWEL_TEXT[jewel]}`}>
+                    <Gamepad2 className="size-8" />
                   </span>
-                </span>
-              </button>
+                  <span className="flex-1">
+                    <span className="block text-xl font-display font-bold">Arcade</span>
+                    <span className="block text-sm text-muted-foreground">
+                      Quick-fire practice games - no stages, just a fast round and a streak.
+                    </span>
+                  </span>
+                </button>
+              )}
             </div>
           </section>
         )}
@@ -596,9 +637,11 @@ export function SubjectPicker({
                     <Button variant="secondary" size="lg" className="rounded-full font-display" onClick={onGoHome}>
                       <Gamepad2 className="size-4" /> Game console
                     </Button>
-                    <Button variant="secondary" size="lg" className="rounded-full font-display" onClick={onOpenStudyBuddy}>
-                      <Bird className="size-4" /> Ask Sage
-                    </Button>
+                    {features.studyBuddyEnabled && (
+                      <Button variant="secondary" size="lg" className="rounded-full font-display" onClick={onOpenStudyBuddy}>
+                        <Bird className="size-4" /> Ask Sage
+                      </Button>
+                    )}
                     <Button variant="secondary" size="lg" className="rounded-full font-display" onClick={onViewLeaderboard}>
                       <Trophy className="size-4" /> Leaderboard
                     </Button>

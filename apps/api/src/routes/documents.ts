@@ -4,14 +4,36 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { documents, subjects } from "../db/schema.js";
 import { uploadDocument, downloadDocument } from "../lib/storage.js";
-import { ensureSubject, saveGeneratedQuestions, createSeedDocument } from "../lib/save-questions.js";
-import { generatedQuestionSetSchema } from "../lib/question-schema.js";
+import { ensureSubject, saveGeneratedQuestions, saveTypedQuestions, createSeedDocument } from "../lib/save-questions.js";
+import { QUESTION_TYPES, questionOptionSchema, validateQuestionShape } from "../lib/question-shape.js";
+import { z } from "zod";
 import { generateQuestionsFromDocument } from "../services/generate-questions.js";
 import { estimateGenerationCosts } from "../lib/ai-pricing.js";
 import type { AiProvider } from "../services/providers/types.js";
 import { requireAdmin } from "../auth.js";
 
 const ALLOWED_MIME = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp"]);
+
+// Wire shape for one question in POST /documents/manual's bulk "I already
+// have questions" body - any of the 8 question types, mirroring admin.ts's
+// questionWriteSchema (minus documentId, which this route sets once for
+// the whole batch via createSeedDocument) but with questionText/
+// explanation required rather than optional, since this route only ever
+// creates new questions, never patches existing ones. Per-type shape
+// rules (accepted answers, match-column pairs, etc.) are checked
+// afterward by validateQuestionShape, not here.
+const manualQuestionSchema = z.object({
+  questionType: z.enum(QUESTION_TYPES).optional(),
+  questionText: z.string().min(1),
+  options: z.array(questionOptionSchema).max(6).optional(),
+  correctOptionId: z.string().optional(),
+  answerPayload: z.record(z.unknown()).nullable().optional(),
+  imageUrl: z.string().min(1).optional(),
+  explanation: z.string().min(1),
+  topics: z.array(z.string().min(1)).optional(),
+  tip: z.string().min(1).optional(),
+});
+const manualQuestionSetSchema = z.array(manualQuestionSchema).min(1);
 
 export async function documentRoutes(app: FastifyInstance) {
   // Content management is admin-only - every route in this file changes
@@ -69,20 +91,41 @@ export async function documentRoutes(app: FastifyInstance) {
       if (!subjectName) return reply.status(400).send({ error: "subjectName is required" });
       if (!rawQuestions) return reply.status(400).send({ error: "questions is required" });
 
-      const parsed = generatedQuestionSetSchema.safeParse(rawQuestions);
+      const parsed = manualQuestionSetSchema.safeParse(rawQuestions);
       if (!parsed.success) {
         return reply.status(400).send({
-          error: "Invalid questions - each needs questionText, 3-6 options with unique ids, a correctOptionId matching one of them, and an explanation.",
+          error: "Invalid questions - check each one's fields for its question type.",
           details: parsed.error.issues,
         });
       }
 
+      // Same per-type validation admin.ts's POST /admin/questions uses for
+      // a single question, run here across the whole batch - any of the 8
+      // types can appear, each mixed freely with the others in one upload
+      // (e.g. a CSSE paper with MCQ, fill-in-blank, and a match-the-column
+      // question together).
+      const shapedRows: Parameters<typeof saveTypedQuestions>[0]["rows"] = [];
+      for (const [i, q] of parsed.data.entries()) {
+        const questionType = q.questionType ?? "mcq";
+        const shape = validateQuestionShape(questionType, q.options ?? [], q.correctOptionId ?? "", q.answerPayload ?? null);
+        if (!shape.ok) {
+          return reply.status(400).send({ error: `Question ${i + 1} ("${q.questionText.slice(0, 40)}"): ${shape.error}` });
+        }
+        shapedRows.push({
+          questionType,
+          questionText: q.questionText,
+          options: shape.options,
+          correctOptionId: shape.correctOptionId,
+          answerPayload: shape.answerPayload,
+          imageUrl: q.imageUrl,
+          explanation: q.explanation,
+          topics: q.topics,
+          tip: q.tip,
+        });
+      }
+
       const doc = await createSeedDocument({ subjectName, filename, mimeType: "text/plain", passage });
-      const result = await saveGeneratedQuestions({
-        subjectName,
-        documentId: doc.id,
-        rawQuestions: parsed.data,
-      });
+      const result = await saveTypedQuestions({ subjectName, documentId: doc.id, rows: shapedRows });
 
       return reply.status(201).send({ status: "ready", questionCount: result.count, documentId: doc.id });
     }

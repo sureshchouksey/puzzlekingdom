@@ -20,6 +20,43 @@ export type Profile = {
   // Which of the 5 per-title avatars was picked (e.g. "prince-3") - null
   // for profiles created before avatar choice existed. See Welcome.tsx.
   avatarId: string | null;
+  // Set only for profiles created via the family sign-up flow (Track 7,
+  // migration 0024) - a nickname + year group instead of a real name, per
+  // the Children's Code data-minimization decision. Undefined for every
+  // pre-existing profile and for any response shape that doesn't return
+  // it (e.g. ProfileLookupResponse from the private Welcome.tsx flow).
+  yearGroup?: string | null;
+};
+
+// Track 7: a family/household account - the tenant boundary above
+// profiles that lets any family sign up independently, separate from the
+// single platform-wide `admins` account. See apps/api/src/routes/
+// families.ts.
+export type Family = {
+  id: string;
+  name: string;
+};
+
+// A parent/guardian login for a family - email + password, distinct from
+// both the passwordless player profiles and the platform admin account.
+// Multiple owners can exist per family (e.g. both parents) from day one.
+export type FamilyOwner = {
+  id: string;
+  familyId: string;
+  email: string;
+};
+
+export type FamilySignupResponse = {
+  family: Family;
+  owner: FamilyOwner;
+  // Only present if a first child was included in the signup call.
+  profile?: Profile;
+  token: string;
+};
+
+export type FamilyLoginResponse = {
+  owner: FamilyOwner;
+  token: string;
 };
 
 export type QuizOption = {
@@ -263,12 +300,14 @@ export type ApiErrorBody = {
   error: string;
 };
 
-export type ManualQuestionInput = {
-  questionText: string;
-  options: QuizOption[];
-  correctOptionId: string;
-  explanation: string;
-};
+// One question in POST /documents/manual's bulk "I already have
+// questions" body - any of the 8 question types (see QuestionType),
+// mirroring AdminQuestionWriteInput minus documentId (the whole batch
+// shares one document, created server-side). questionText/explanation
+// are effectively required for this route even though optional here -
+// UploadScreen only ever sends complete, validated drafts (see
+// questionAuthoring.tsx's draftIsValid).
+export type ManualQuestionInput = Omit<AdminQuestionWriteInput, "documentId">;
 
 export type SaveManualQuestionsParams = {
   subjectName: string;
@@ -455,6 +494,7 @@ export type AdminUserSummary = {
   profileId: string;
   name: string;
   title: string | null;
+  avatarId: string | null;
   createdAt: string;
   hasPin: boolean;
   quizzesPlayed: number;
@@ -569,9 +609,13 @@ export type GenerateInsightsResponse =
   | { generated: true; insights: TutorGrowthInsight[] }
   | { generated: false; reason: "not_enough_activity" };
 
-// The admin-only Study Buddy settings toggle/caps (Section 10 step 9) -
-// mirrors apps/api/src/services/tutorBudget.ts's own AppSettings shape.
-export type TutorSettings = {
+// The admin-only settings singleton (Section 10 step 9, extended by
+// flag-based feature management, migration 0023) - mirrors
+// apps/api/src/services/tutorBudget.ts's own AppSettings shape exactly,
+// down to the name: this now covers more than just Study Buddy (Arcade
+// and its 5 games too), so it's named to match the backend rather than
+// keep the old tutor-only name.
+export type AppSettings = {
   tutorEnabled: boolean;
   tutorDailyCapPerProfile: number;
   tutorSharedDailyBudget: number | null;
@@ -580,4 +624,25 @@ export type TutorSettings = {
   tutorUseConceptGuides: boolean;
   tutorUseCache: boolean;
   tutorUseGemini: boolean;
+  // Flag-based feature management (migration 0023) - see schema.ts's
+  // appSettings table (backend) for what each one gates.
+  arcadeEnabled: boolean;
+  gameSpellingSprintEnabled: boolean;
+  gameMissingLettersEnabled: boolean;
+  gameWordMeaningMatchEnabled: boolean;
+  gameHomophoneHunterEnabled: boolean;
+  gamePrefixSuffixBuilderEnabled: boolean;
+  tutorFunContentEnabled: boolean;
+};
+
+// The public summary of the same flags GET /features returns - what the
+// kid-facing app (Home, SubjectPicker, StudyBuddy, Arcade) reads to
+// decide what to show. A deliberately smaller shape than AppSettings
+// above: just the on/off booleans a player screen cares about, none of
+// the admin-only caps/budget numbers.
+export type FeatureFlags = {
+  studyBuddyEnabled: boolean;
+  funContentEnabled: boolean;
+  arcadeEnabled: boolean;
+  games: Record<GameKey, boolean>;
 };

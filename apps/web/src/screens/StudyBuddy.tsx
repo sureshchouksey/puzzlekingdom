@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, BookOpenText, Bird, Dices, GraduationCap, Laugh, Lightbulb, Puzzle as PuzzleIcon, Send } from "lucide-react";
-import { getClassSubjects, getTutorConversation, sendTutorMessage, startTutorConversation } from "../api";
+import { getClassSubjects, getFeatures, getTutorConversation, sendTutorMessage, startTutorConversation } from "../api";
 import type { PkClass, Subject, TutorConversation, TutorMessage, TutorMessageMode, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
 
@@ -73,6 +73,19 @@ export function StudyBuddy({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Flag-based feature management (migration 0023) - gates the fun-
+  // content quick chips just below (Play a game/Riddle/Joke/Tongue
+  // twister/Reveal answer all route to the same riddle/joke/tongue-
+  // twister/trivia bank server-side, see tutor.ts's fun_request branch).
+  // Defaults to true (fail open) while loading - matches the same
+  // convention Home.tsx/SubjectPicker.tsx use for their own entry points.
+  const [funContentEnabled, setFunContentEnabled] = useState(true);
+  useEffect(() => {
+    getFeatures()
+      .then((f) => setFunContentEnabled(f.funContentEnabled))
+      .catch(() => {});
+  }, []);
 
   const classId = questionContext ? questionContext.classId : pkClass?.id;
 
@@ -233,20 +246,32 @@ export function StudyBuddy({
         {!questionContext && conversation && (
           <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
             {[
-              { label: "Play a game", icon: Dices, text: "Can we play a game?" },
+              // "Play a game" (with no further specifics) and the four
+              // chips after "Quiz me!" all route to the same fun_content
+              // bank server-side (tutorIntent.ts's keyword fallback picks
+              // a random riddle/joke/tongue-twister/puzzle for the bare
+              // "Can we play a game?" phrase) - so all 5 are gated
+              // together by funContentEnabled below, distinct from "Quiz
+              // me!" itself, which is real curriculum content
+              // (tutorQuizGame.ts) and always stays on.
+              ...(funContentEnabled ? [{ label: "Play a game", icon: Dices, text: "Can we play a game?" }] : []),
               // Real curriculum questions from this chat's own class/
               // subject (tutorQuizGame.ts) - distinct from the riddle/
               // joke/trivia chips below, which stay general fun content.
               { label: "Quiz me!", icon: GraduationCap, text: "Give me a real practice question from my lessons!" },
-              { label: "Riddle", icon: PuzzleIcon, text: "Give me a riddle!" },
-              { label: "Joke", icon: Laugh, text: "Tell me a joke!" },
-              { label: "Tongue twister", icon: BookOpenText, text: "Give me a tongue twister!" },
-              // Riddles/jokes/puzzles/trivia deliberately withhold their
-              // answer until asked (see funContent.ts's
-              // formatFunContentReply) - this chip is the easy, discoverable
-              // way for a child to ask, rather than needing to type
-              // something like "what's the answer" themselves.
-              { label: "Reveal answer", icon: Lightbulb, text: "What's the answer?" },
+              ...(funContentEnabled
+                ? [
+                    { label: "Riddle", icon: PuzzleIcon, text: "Give me a riddle!" },
+                    { label: "Joke", icon: Laugh, text: "Tell me a joke!" },
+                    { label: "Tongue twister", icon: BookOpenText, text: "Give me a tongue twister!" },
+                    // Riddles/jokes/puzzles/trivia deliberately withhold their
+                    // answer until asked (see funContent.ts's
+                    // formatFunContentReply) - this chip is the easy, discoverable
+                    // way for a child to ask, rather than needing to type
+                    // something like "what's the answer" themselves.
+                    { label: "Reveal answer", icon: Lightbulb, text: "What's the answer?" },
+                  ]
+                : []),
             ].map(({ label, icon: Icon, text }) => (
               <button
                 key={label}

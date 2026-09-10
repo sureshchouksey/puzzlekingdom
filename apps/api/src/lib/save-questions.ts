@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { subjects, classes, documents, questions } from "../db/schema.js";
 import { generatedQuestionSetSchema, type GeneratedQuestion } from "./question-schema.js";
+import type { QuestionType, QuestionOption } from "./question-shape.js";
 
 export async function ensureSubject(name: string) {
   const existing = await db.select().from(subjects).where(eq(subjects.name, name)).limit(1);
@@ -53,6 +54,54 @@ export async function createSeedDocument(params: {
     })
     .returning();
   return doc;
+}
+
+// Inserts a batch of already type-validated questions (the caller has
+// already run each one through question-shape.ts's validateQuestionShape)
+// against one document - used by POST /documents/manual's "I already
+// have questions" path, which (unlike saveGeneratedQuestions above) isn't
+// limited to MCQ: any of the 8 question types can appear in the same
+// batch, each with whatever answerPayload its type needs. Deliberately a
+// separate function from saveGeneratedQuestions rather than a shared one
+// with a type switch - that function is also the AI-generation path's
+// insert, which stays MCQ-only on purpose (see
+// Question-Types-and-Content-Authoring-Plan.md's "deliberately skipped"
+// note on extending AI generation to the new types), so keeping them
+// separate means a future change to one can't accidentally affect the
+// other.
+export async function saveTypedQuestions(params: {
+  subjectName: string;
+  documentId: string;
+  rows: Array<{
+    questionType: QuestionType;
+    questionText: string;
+    options: QuestionOption[];
+    correctOptionId: string;
+    answerPayload: Record<string, unknown> | null;
+    imageUrl?: string;
+    explanation: string;
+    topics?: string[];
+    tip?: string;
+  }>;
+}) {
+  const subject = await ensureSubject(params.subjectName);
+
+  const rows = params.rows.map((q) => ({
+    documentId: params.documentId,
+    subjectId: subject.id,
+    questionText: q.questionText,
+    questionType: q.questionType,
+    options: q.options,
+    correctOptionId: q.correctOptionId,
+    answerPayload: q.answerPayload,
+    imageUrl: q.imageUrl,
+    explanation: q.explanation,
+    topics: q.topics,
+    tip: q.tip,
+  }));
+
+  const inserted = await db.insert(questions).values(rows).returning({ id: questions.id });
+  return { subject, count: inserted.length };
 }
 
 export async function saveGeneratedQuestions(params: {

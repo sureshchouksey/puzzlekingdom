@@ -273,3 +273,18 @@ export async function getGrowthInsights(profileId: string): Promise<GrowthInsigh
     .where(eq(tutorGrowthInsights.profileId, profileId))
     .orderBy(desc(tutorGrowthInsights.generatedAt));
 }
+
+// Wipes every stored insight for a profile, without touching the raw
+// tutor_messages history getDoubtBreakdown reads from - so "Generate
+// insights" afterwards starts from a clean slate rather than upserting
+// on top of whatever was there before. Added 10 September 2026 after a
+// real click-through turned up stale rows from an early prototype of
+// this feature (before buildInsightPrompt existed) still sitting in the
+// live database, worded nothing like a real generated insight - an admin
+// needed a way to clear those out without waiting on a valid
+// GEMINI_API_KEY to regenerate (upserting only overwrites a topic that's
+// asked about again, so a topic that's gone quiet keeps its stale row
+// forever otherwise).
+export async function clearGrowthInsights(profileId: string): Promise<void> {
+  await db.delete(tutorGrowthInsights).where(eq(tutorGrowthInsights.profileId, profileId));
+}

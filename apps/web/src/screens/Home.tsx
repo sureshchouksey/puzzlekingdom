@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Bird, ChartColumn, Play, Trophy } from "lucide-react";
+import { getFeatures } from "../api";
 import { Button } from "../components/ui/button";
 
 // The quest hub: same night-sky/gold chrome as Welcome (see
@@ -21,6 +23,19 @@ export function Home({
   onViewLeaderboard: () => void;
   onOpenStudyBuddy: () => void;
 }) {
+  // Flag-based feature management (migration 0023) - fetched fresh on
+  // every visit to the hub rather than threaded down from App.tsx, same
+  // "each screen fetches what it needs" convention SubjectPicker/Arcade
+  // already use for their own data. Defaults to true (fail open) while
+  // loading and on a fetch error - never hide a button because of a
+  // network hiccup, same philosophy as the backend's own DEFAULT_SETTINGS.
+  const [studyBuddyEnabled, setStudyBuddyEnabled] = useState(true);
+  useEffect(() => {
+    getFeatures()
+      .then((f) => setStudyBuddyEnabled(f.studyBuddyEnabled))
+      .catch(() => {});
+  }, []);
+
   return (
     <main className="night-sky relative min-h-screen overflow-hidden">
       <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
@@ -46,15 +61,17 @@ export function Home({
           </Button>
 
           <div className="mt-4 flex flex-col gap-3">
-            <button
-              onClick={onOpenStudyBuddy}
-              className="group flex items-center gap-4 rounded-2xl border border-border/70 bg-card/80 p-4 text-left backdrop-blur transition-transform hover:-translate-y-0.5 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              <span className="grid size-11 shrink-0 place-items-center rounded-full bg-secondary text-primary">
-                <Bird className="size-5" />
-              </span>
-              <span className="font-display font-semibold">Ask your Study Buddy</span>
-            </button>
+            {studyBuddyEnabled && (
+              <button
+                onClick={onOpenStudyBuddy}
+                className="group flex items-center gap-4 rounded-2xl border border-border/70 bg-card/80 p-4 text-left backdrop-blur transition-transform hover:-translate-y-0.5 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <span className="grid size-11 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                  <Bird className="size-5" />
+                </span>
+                <span className="font-display font-semibold">Ask your Study Buddy</span>
+              </button>
+            )}
 
             <button
               onClick={onViewLeaderboard}

@@ -2,10 +2,11 @@ import type { FastifyInstance } from "fastify";
 import bcrypt from "bcryptjs";
 import { eq, and, desc, ilike, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { admins, questions, documents, subjects, classes, topics, profiles, quizAttempts, quizAttemptAnswers } from "../db/schema.js";
+import { admins, questions, documents, subjects, classes, topics, profiles, quizAttempts, quizAttemptAnswers, tutorConversations, tutorGrowthInsights, gameAttempts } from "../db/schema.js";
 import { generatedOptionSchema } from "../lib/question-schema.js";
+import { QUESTION_TYPES, type QuestionType, type QuestionOption, validateQuestionShape } from "../lib/question-shape.js";
 import { getAppSettings } from "../services/tutorBudget.js";
-import { generateGrowthInsights, getDoubtBreakdown, getGrowthInsights } from "../services/tutorInsights.js";
+import { clearGrowthInsights, generateGrowthInsights, getDoubtBreakdown, getGrowthInsights } from "../services/tutorInsights.js";
 import { requireAdmin } from "../auth.js";
 import { z } from "zod";
 
@@ -29,25 +30,16 @@ const settingsWriteSchema = z.object({
   tutorUseConceptGuides: z.boolean().optional(),
   tutorUseCache: z.boolean().optional(),
   tutorUseGemini: z.boolean().optional(),
+  // Flag-based feature management (migration 0023) - see
+  // tutorBudget.ts's AppSettings for what each one gates.
+  arcadeEnabled: z.boolean().optional(),
+  gameSpellingSprintEnabled: z.boolean().optional(),
+  gameMissingLettersEnabled: z.boolean().optional(),
+  gameWordMeaningMatchEnabled: z.boolean().optional(),
+  gameHomophoneHunterEnabled: z.boolean().optional(),
+  gamePrefixSuffixBuilderEnabled: z.boolean().optional(),
+  tutorFunContentEnabled: z.boolean().optional(),
 });
-
-// The 8 question types from Question-Types-and-Content-Authoring-Plan.md's
-// "Data model recommendation" - mcq/true_false keep using the existing
-// options/correctOptionId columns (true_false is just mcq's shape fixed to
-// two options, rendered as a toggle on the frontend); everything else
-// stores its answer shape in answerPayload instead and leaves
-// options/correctOptionId empty (see lib/scoring.ts's GradableQuestion for
-// exactly what each type's answerPayload holds).
-const QUESTION_TYPES = [
-  "mcq",
-  "true_false",
-  "fill_blank",
-  "missing_number",
-  "missing_spelling",
-  "match_column",
-  "short_answer",
-  "long_answer",
-] as const;
 
 // Body shape for creating/editing one question by hand from the admin
 // dashboard - looser than generatedQuestionSchema (every field optional
@@ -74,75 +66,6 @@ const questionWriteSchema = z.object({
   topics: z.array(z.string().min(1)).optional(),
   tip: z.string().min(1).optional(),
 });
-
-type QuestionType = (typeof QUESTION_TYPES)[number];
-type QuestionOption = { id: string; text: string };
-
-// Validates + normalizes one question's type-specific shape, shared by
-// POST and PATCH so the per-type rules only live in one place. Returns
-// the final options/correctOptionId/answerPayload to persist (non-mcq
-// types always persist an empty options array + empty correctOptionId,
-// since those DB columns are NOT NULL but semantically unused once
-// answerPayload is what scoring.ts actually reads) or an error string.
-function validateQuestionShape(
-  questionType: QuestionType,
-  options: QuestionOption[],
-  correctOptionId: string,
-  answerPayload: Record<string, unknown> | null
-):
-  | { ok: true; options: QuestionOption[]; correctOptionId: string; answerPayload: Record<string, unknown> | null }
-  | { ok: false; error: string } {
-  switch (questionType) {
-    case "mcq": {
-      if (options.length < 3) return { ok: false, error: "An MCQ question needs at least 3 options" };
-      if (!correctOptionId || !options.some((o) => o.id === correctOptionId)) {
-        return { ok: false, error: "correctOptionId must match the id of one of the options" };
-      }
-      return { ok: true, options, correctOptionId, answerPayload: null };
-    }
-    case "true_false": {
-      if (options.length !== 2) return { ok: false, error: "A True/False question needs exactly 2 options" };
-      if (!correctOptionId || !options.some((o) => o.id === correctOptionId)) {
-        return { ok: false, error: "correctOptionId must match the id of one of the options" };
-      }
-      return { ok: true, options, correctOptionId, answerPayload: null };
-    }
-    case "fill_blank":
-    case "missing_number":
-    case "missing_spelling": {
-      const accepted = answerPayload?.acceptedAnswers;
-      if (!Array.isArray(accepted) || accepted.length === 0 || !accepted.every((a) => typeof a === "string" && a.trim().length > 0)) {
-        return { ok: false, error: "At least one accepted answer is required" };
-      }
-      return { ok: true, options: [], correctOptionId: "", answerPayload: { acceptedAnswers: accepted } };
-    }
-    case "match_column": {
-      const left = answerPayload?.left;
-      const right = answerPayload?.right;
-      const correctPairs = answerPayload?.correctPairs;
-      const validList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string" && x.trim().length > 0);
-      if (!validList(left) || !validList(right) || left.length !== right.length || left.length < 2) {
-        return { ok: false, error: "Match the column needs at least 2 pairs, with both sides filled in" };
-      }
-      if (
-        !Array.isArray(correctPairs) ||
-        correctPairs.length !== left.length ||
-        !correctPairs.every((p) => Array.isArray(p) && p.length === 2 && typeof p[0] === "number" && typeof p[1] === "number")
-      ) {
-        return { ok: false, error: "correctPairs must have one [leftIndex, rightIndex] entry per pair" };
-      }
-      return { ok: true, options: [], correctOptionId: "", answerPayload: { left, right, correctPairs } };
-    }
-    case "short_answer":
-    case "long_answer": {
-      const rubric = answerPayload?.rubricKeyPoints;
-      if (!Array.isArray(rubric) || rubric.length === 0 || !rubric.every((a) => typeof a === "string" && a.trim().length > 0)) {
-        return { ok: false, error: "At least one rubric key point (used as the model answer) is required" };
-      }
-      return { ok: true, options: [], correctOptionId: "", answerPayload: { rubricKeyPoints: rubric } };
-    }
-  }
-}
 
 // Body shape for creating/editing a subject from the admin dashboard.
 // Subjects are flat and reusable across classes (see subjects.ts) - just
@@ -187,6 +110,32 @@ export async function adminRoutes(app: FastifyInstance) {
     return reply.send({ admin: { id: admin.id, username: admin.username }, token });
   });
 
+  // Public summary of the flag-based feature toggles (migration 0023) -
+  // deliberately NOT under requireAdmin, since this is exactly what the
+  // kid-facing app (Home, SubjectPicker, StudyBuddy, Arcade) needs to
+  // read on every screen to decide what to show. Only exposes the on/off
+  // booleans a normal player screen cares about, not the admin-only caps
+  // (tutorDailyCapPerProfile etc.) GET /admin/settings returns - those
+  // stay behind requireAdmin below. Each game's flag is ANDed with the
+  // arcade master switch here, so the frontend never has to know that
+  // rule exists - "arcade off" and "this one game off" both just read as
+  // `false` for that game.
+  app.get("/features", async () => {
+    const settings = await getAppSettings();
+    return {
+      studyBuddyEnabled: settings.tutorEnabled,
+      funContentEnabled: settings.tutorFunContentEnabled,
+      arcadeEnabled: settings.arcadeEnabled,
+      games: {
+        spelling_sprint: settings.arcadeEnabled && settings.gameSpellingSprintEnabled,
+        missing_letters: settings.arcadeEnabled && settings.gameMissingLettersEnabled,
+        word_meaning_match: settings.arcadeEnabled && settings.gameWordMeaningMatchEnabled,
+        homophone_hunter: settings.arcadeEnabled && settings.gameHomophoneHunterEnabled,
+        prefix_suffix_builder: settings.arcadeEnabled && settings.gamePrefixSuffixBuilderEnabled,
+      },
+    };
+  });
+
   // Everything below this line requires a valid admin session. A nested
   // register() creates its own encapsulation context, which is required
   // here - addHook only exempts routes in a SEPARATE context, not routes
@@ -197,16 +146,22 @@ export async function adminRoutes(app: FastifyInstance) {
   await app.register(async (protectedApp) => {
   protectedApp.addHook("preHandler", requireAdmin);
 
-  protectedApp.get<{ Querystring: { subjectName?: string; classId?: string; search?: string; limit?: string; cursor?: string } }>(
+  protectedApp.get<{
+    Querystring: { subjectName?: string; classId?: string; topic?: string; search?: string; limit?: string; cursor?: string };
+  }>(
     "/admin/questions",
     async (request) => {
-      const { subjectName, classId, search } = request.query;
+      const { subjectName, classId, topic, search } = request.query;
       const limit = Math.min(Number(request.query.limit) || DEFAULT_PAGE_SIZE, 100);
       const offset = Math.max(Number(request.query.cursor) || 0, 0);
 
       const conditions = [];
       if (subjectName) conditions.push(eq(subjects.name, subjectName));
       if (classId) conditions.push(eq(documents.classId, classId));
+      // topics is a text[] tag array - a question matches if the requested
+      // topic string is one of its tags, same convention as quizzes.ts's
+      // assembleQuiz topic filter.
+      if (topic) conditions.push(sql`${questions.topics} @> ARRAY[${topic}]::text[]`);
       if (search) conditions.push(ilike(questions.questionText, `%${search}%`));
 
       const rows = await db
@@ -452,6 +407,7 @@ export async function adminRoutes(app: FastifyInstance) {
       profile_id: string;
       name: string;
       title: string | null;
+      avatar_id: string | null;
       created_at: string;
       has_pin: boolean;
       quizzes_played: number;
@@ -484,6 +440,7 @@ export async function adminRoutes(app: FastifyInstance) {
         p.id as profile_id,
         p.name,
         p.title,
+        p.avatar_id,
         p.created_at,
         (p.pin_hash is not null) as has_pin,
         coalesce(attempt_agg.quizzes_played, 0) as quizzes_played,
@@ -501,6 +458,7 @@ export async function adminRoutes(app: FastifyInstance) {
       profileId: r.profile_id,
       name: r.name,
       title: r.title,
+      avatarId: r.avatar_id,
       createdAt: r.created_at,
       hasPin: r.has_pin,
       quizzesPlayed: Number(r.quizzes_played),
@@ -510,6 +468,59 @@ export async function adminRoutes(app: FastifyInstance) {
       accuracy: Number(r.questions_answered) > 0 ? Number(r.questions_correct) / Number(r.questions_answered) : null,
       lastActive: r.last_active,
     }));
+  });
+
+  // Full, irreversible hard delete of a profile and every row that
+  // depends on it - the cleanup-activities delete the user asked for.
+  // Most FKs to profiles.id do NOT cascade at the DB level (only
+  // tutorGrowthInsights does, and only tutorMessages cascades from
+  // tutorConversations - see migration 0008's comment), so this deletes
+  // explicitly, in dependency order, inside one transaction: any failure
+  // rolls the whole thing back rather than leaving orphaned rows.
+  protectedApp.delete<{ Params: { profileId: string } }>("/admin/users/:profileId", async (request, reply) => {
+    const { profileId } = request.params;
+    const [existing] = await db.select({ id: profiles.id }).from(profiles).where(eq(profiles.id, profileId));
+    if (!existing) return reply.status(404).send({ error: "Profile not found" });
+
+    await db.transaction(async (tx) => {
+      // quiz_attempt_answers has no direct profile_id column - it hangs
+      // off quiz_attempts, so delete via a subquery before the attempts
+      // themselves.
+      await tx.execute(sql`
+        delete from ${quizAttemptAnswers}
+        where ${quizAttemptAnswers.attemptId} in (
+          select id from ${quizAttempts} where ${quizAttempts.profileId} = ${profileId}
+        )
+      `);
+      // tutor_conversations must go before quizAttempts below -
+      // related_attempt_id references quiz_attempts.id with no cascade,
+      // so deleting the attempts first 500s if any conversation (this
+      // profile's own, e.g. from "Explain this to me") still points at
+      // one. Deleting tutor_conversations cascades tutor_messages
+      // automatically (onDelete: "cascade", verified against migration
+      // 0008's actual SQL).
+      await tx.delete(tutorConversations).where(eq(tutorConversations.profileId, profileId));
+      // Defensive: null out any other conversation's related_attempt_id
+      // that still points at one of this profile's attempts (shouldn't
+      // happen today - conversations are per-profile - but the FK has no
+      // ON DELETE behavior at all, so this keeps a future edge case from
+      // reintroducing the same 500 instead of silently corrupting data).
+      await tx.execute(sql`
+        update ${tutorConversations}
+        set related_attempt_id = null
+        where related_attempt_id in (
+          select id from ${quizAttempts} where ${quizAttempts.profileId} = ${profileId}
+        )
+      `);
+      await tx.delete(quizAttempts).where(eq(quizAttempts.profileId, profileId));
+      // Redundant safety net - tutorGrowthInsights already cascades on
+      // profile delete, but profiles isn't deleted until the next line.
+      await tx.delete(tutorGrowthInsights).where(eq(tutorGrowthInsights.profileId, profileId));
+      await tx.delete(gameAttempts).where(eq(gameAttempts.profileId, profileId));
+      await tx.delete(profiles).where(eq(profiles.id, profileId));
+    });
+
+    return reply.status(204).send();
   });
 
   // Forgot-PIN recovery: clears a profile's PIN so it goes back to the
@@ -555,6 +566,21 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   );
 
+  // Lets an admin wipe a profile's stored insights outright - see
+  // clearGrowthInsights's own comment for why this exists (stale rows
+  // from an early version of this feature, found via a real click-
+  // through, that "Generate insights" alone can't clean up while
+  // GEMINI_API_KEY stays invalid).
+  protectedApp.delete<{ Params: { profileId: string } }>(
+    "/admin/users/:profileId/tutor-insights",
+    async (request, reply) => {
+      const [profile] = await db.select().from(profiles).where(eq(profiles.id, request.params.profileId)).limit(1);
+      if (!profile) return reply.status(404).send({ error: "Profile not found" });
+      await clearGrowthInsights(profile.id);
+      return reply.status(204).send();
+    }
+  );
+
   // The Study Buddy on/off switch and its caps (Section 10 step 5/6) -
   // reads/writes the same app_settings singleton row tutorBudget.ts's
   // getAppSettings() reads on every chat turn. GET exists so the admin
@@ -588,6 +614,13 @@ export async function adminRoutes(app: FastifyInstance) {
       tutorUseConceptGuides: body.tutorUseConceptGuides ?? current.tutorUseConceptGuides,
       tutorUseCache: body.tutorUseCache ?? current.tutorUseCache,
       tutorUseGemini: body.tutorUseGemini ?? current.tutorUseGemini,
+      arcadeEnabled: body.arcadeEnabled ?? current.arcadeEnabled,
+      gameSpellingSprintEnabled: body.gameSpellingSprintEnabled ?? current.gameSpellingSprintEnabled,
+      gameMissingLettersEnabled: body.gameMissingLettersEnabled ?? current.gameMissingLettersEnabled,
+      gameWordMeaningMatchEnabled: body.gameWordMeaningMatchEnabled ?? current.gameWordMeaningMatchEnabled,
+      gameHomophoneHunterEnabled: body.gameHomophoneHunterEnabled ?? current.gameHomophoneHunterEnabled,
+      gamePrefixSuffixBuilderEnabled: body.gamePrefixSuffixBuilderEnabled ?? current.gamePrefixSuffixBuilderEnabled,
+      tutorFunContentEnabled: body.tutorFunContentEnabled ?? current.tutorFunContentEnabled,
     };
 
     await db.execute(sql`
@@ -599,6 +632,13 @@ export async function adminRoutes(app: FastifyInstance) {
         tutor_use_concept_guides = ${next.tutorUseConceptGuides},
         tutor_use_cache = ${next.tutorUseCache},
         tutor_use_gemini = ${next.tutorUseGemini},
+        arcade_enabled = ${next.arcadeEnabled},
+        game_spelling_sprint_enabled = ${next.gameSpellingSprintEnabled},
+        game_missing_letters_enabled = ${next.gameMissingLettersEnabled},
+        game_word_meaning_match_enabled = ${next.gameWordMeaningMatchEnabled},
+        game_homophone_hunter_enabled = ${next.gameHomophoneHunterEnabled},
+        game_prefix_suffix_builder_enabled = ${next.gamePrefixSuffixBuilderEnabled},
+        tutor_fun_content_enabled = ${next.tutorFunContentEnabled},
         updated_at = now()
       where id = true
     `);

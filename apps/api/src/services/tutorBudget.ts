@@ -35,6 +35,15 @@ export interface AppSettings {
   tutorUseConceptGuides: boolean;
   tutorUseCache: boolean;
   tutorUseGemini: boolean;
+  // Flag-based feature management (migration 0023) - see schema.ts's
+  // appSettings table for what each one gates.
+  arcadeEnabled: boolean;
+  gameSpellingSprintEnabled: boolean;
+  gameMissingLettersEnabled: boolean;
+  gameWordMeaningMatchEnabled: boolean;
+  gameHomophoneHunterEnabled: boolean;
+  gamePrefixSuffixBuilderEnabled: boolean;
+  tutorFunContentEnabled: boolean;
 }
 
 // Matches the migration's own defaults - used only if app_settings'
@@ -50,6 +59,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   tutorUseConceptGuides: true,
   tutorUseCache: true,
   tutorUseGemini: true,
+  arcadeEnabled: true,
+  gameSpellingSprintEnabled: true,
+  gameMissingLettersEnabled: true,
+  gameWordMeaningMatchEnabled: true,
+  gameHomophoneHunterEnabled: true,
+  gamePrefixSuffixBuilderEnabled: true,
+  tutorFunContentEnabled: true,
 };
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -60,7 +76,14 @@ export async function getAppSettings(): Promise<AppSettings> {
       tutor_shared_daily_budget as "tutorSharedDailyBudget",
       tutor_use_concept_guides as "tutorUseConceptGuides",
       tutor_use_cache as "tutorUseCache",
-      tutor_use_gemini as "tutorUseGemini"
+      tutor_use_gemini as "tutorUseGemini",
+      arcade_enabled as "arcadeEnabled",
+      game_spelling_sprint_enabled as "gameSpellingSprintEnabled",
+      game_missing_letters_enabled as "gameMissingLettersEnabled",
+      game_word_meaning_match_enabled as "gameWordMeaningMatchEnabled",
+      game_homophone_hunter_enabled as "gameHomophoneHunterEnabled",
+      game_prefix_suffix_builder_enabled as "gamePrefixSuffixBuilderEnabled",
+      tutor_fun_content_enabled as "tutorFunContentEnabled"
     from app_settings
     where id = true
     limit 1
