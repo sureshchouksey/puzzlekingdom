@@ -47,6 +47,27 @@ function shuffled<T>(items: T[]): T[] {
   return arr;
 }
 
+// Strips a question's answerPayload down to only what's safe to show
+// BEFORE it's answered - the same spoiler concern the comment on
+// /quizzes above already applies to correctOptionId, just extended to
+// the 6 newer question types. fill_blank/missing_number/missing_spelling
+// store the correct answer itself in acceptedAnswers, and
+// short_answer/long_answer's rubricKeyPoints is the model answer - both
+// are withheld entirely pre-answer (there's nothing else in there the
+// child needs to see; the blank/prompt is already part of questionText).
+// match_column is the one type where the child needs SOME of the payload
+// up front - the left/right lists to build pairs from - so only
+// correctPairs (the answer key) is stripped, not the lists themselves.
+function assemblyAnswerPayload(
+  questionType: string,
+  answerPayload: Record<string, unknown> | null
+): { left: unknown; right: unknown } | null {
+  if (questionType === "match_column" && answerPayload) {
+    return { left: answerPayload.left, right: answerPayload.right };
+  }
+  return null;
+}
+
 export async function quizRoutes(app: FastifyInstance) {
   // Assemble a quiz: by default, pull in EVERY question already saved for
   // this subject (optionally narrowed to one class and/or one topic) - not
@@ -94,6 +115,9 @@ export async function quizRoutes(app: FastifyInstance) {
         id: questions.id,
         questionText: questions.questionText,
         options: questions.options,
+        questionType: questions.questionType,
+        answerPayload: questions.answerPayload,
+        imageUrl: questions.imageUrl,
         documentId: questions.documentId,
         passage: documents.passage,
         topics: questions.topics,
@@ -144,7 +168,10 @@ export async function quizRoutes(app: FastifyInstance) {
       questions: picked.map((q) => ({
         id: q.id,
         questionText: q.questionText,
-        options: shuffled(q.options),
+        questionType: q.questionType,
+        options: q.questionType === "mcq" || q.questionType === "true_false" ? shuffled(q.options) : [],
+        answerPayload: assemblyAnswerPayload(q.questionType, q.answerPayload),
+        imageUrl: q.imageUrl,
         documentId: q.documentId,
         passage: q.passage,
         topics: q.topics,
@@ -241,6 +268,9 @@ export async function quizRoutes(app: FastifyInstance) {
           id: questions.id,
           questionText: questions.questionText,
           options: questions.options,
+          questionType: questions.questionType,
+          answerPayload: questions.answerPayload,
+          imageUrl: questions.imageUrl,
           documentId: questions.documentId,
           passage: documents.passage,
           topics: questions.topics,
@@ -262,7 +292,10 @@ export async function quizRoutes(app: FastifyInstance) {
         questions: orderedQuestions.map((q) => ({
           id: q.id,
           questionText: q.questionText,
-          options: shuffled(q.options),
+          questionType: q.questionType,
+          options: q.questionType === "mcq" || q.questionType === "true_false" ? shuffled(q.options) : [],
+          answerPayload: assemblyAnswerPayload(q.questionType, q.answerPayload),
+          imageUrl: q.imageUrl,
           documentId: q.documentId,
           passage: q.passage,
           topics: q.topics,
@@ -332,8 +365,10 @@ export async function quizRoutes(app: FastifyInstance) {
         score: number | null;
         spellingIssues: SpellingIssue[] | null;
         questionText: string;
+        questionType: string;
         options: unknown;
         correctOptionId: string;
+        answerPayload: Record<string, unknown> | null;
         explanation: string;
         tip: string | null;
       }[] = [];
@@ -370,8 +405,10 @@ export async function quizRoutes(app: FastifyInstance) {
             score,
             spellingIssues,
             questionText: question.questionText,
+            questionType: question.questionType,
             options: question.options,
             correctOptionId: question.correctOptionId,
+            answerPayload: question.answerPayload,
             explanation: question.explanation,
             tip: !isCorrect ? question.tip : null,
           });
@@ -426,10 +463,12 @@ export async function quizRoutes(app: FastifyInstance) {
             {
               questionId: g.questionId,
               questionText: g.questionText,
+              questionType: g.questionType,
               options: g.options,
               selectedOptionId: g.selectedOptionId,
               selectedPayload: g.selectedPayload,
               correctOptionId: g.correctOptionId,
+              answerPayload: g.answerPayload,
               explanation: g.explanation,
               tip: g.tip,
               isCorrect: g.isCorrect,
@@ -472,8 +511,10 @@ export async function quizRoutes(app: FastifyInstance) {
           score: quizAttemptAnswers.score,
           spellingIssues: quizAttemptAnswers.spellingIssues,
           questionText: questions.questionText,
+          questionType: questions.questionType,
           options: questions.options,
           correctOptionId: questions.correctOptionId,
+          answerPayload: questions.answerPayload,
           explanation: questions.explanation,
           tip: questions.tip,
         })
@@ -499,10 +540,12 @@ export async function quizRoutes(app: FastifyInstance) {
           {
             questionId: r.questionId,
             questionText: r.questionText,
+            questionType: r.questionType,
             options: r.options,
             selectedOptionId: r.selectedOptionId,
             selectedPayload: r.selectedPayload,
             correctOptionId: r.correctOptionId,
+            answerPayload: r.answerPayload,
             explanation: r.explanation,
             tip: !r.isCorrect ? r.tip : null,
             isCorrect: r.isCorrect,
@@ -621,6 +664,8 @@ export async function quizRoutes(app: FastifyInstance) {
               questionText: questions.questionText,
               options: questions.options,
               correctOptionId: questions.correctOptionId,
+              questionType: questions.questionType,
+              answerPayload: questions.answerPayload,
               explanation: questions.explanation,
               tip: questions.tip,
               documentId: questions.documentId,
@@ -655,10 +700,12 @@ export async function quizRoutes(app: FastifyInstance) {
         return {
           questionId: a.questionId,
           questionText: question?.questionText ?? null,
+          questionType: question?.questionType ?? "mcq",
           options: question?.options ?? [],
           selectedOptionId: a.selectedOptionId,
           selectedPayload: a.selectedPayload,
           correctOptionId: question?.correctOptionId ?? null,
+          answerPayload: question?.answerPayload ?? null,
           explanation: question?.explanation ?? null,
           // Only worth showing the tip when it's actually needed - a
           // correct answer doesn't need a trick for next time.

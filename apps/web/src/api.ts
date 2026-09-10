@@ -18,6 +18,7 @@ import type {
   QuizResults,
   SaveManualQuestionsParams,
   SaveManualQuestionsResponse,
+  SelectedPayload,
   Subject,
   SubmitStageResponse,
   TopicReport,
@@ -246,7 +247,7 @@ export function resumeQuiz(params: { profileId: string; subjectName: string; cla
 // answers to continue; the response says whether the attempt is complete.
 export function submitStage(params: {
   attemptId: string;
-  answers: { questionId: string; selectedOptionId: string }[];
+  answers: { questionId: string; selectedOptionId?: string; selectedPayload?: SelectedPayload }[];
 }): Promise<SubmitStageResponse> {
   return apiFetch(`/quizzes/${params.attemptId}/submit`, {
     method: "POST",

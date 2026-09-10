@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
-import { ArrowLeft, Check, MessageCircle, PartyPopper, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, PartyPopper, Sparkles } from "lucide-react";
 import { submitStage } from "../api";
-import type { AssembleQuizResponse, QuizQuestion, SubmitStageResponse, TutorQuestionContext } from "../types";
+import { AnswerReviewCard } from "../components/AnswerReviewCard";
+import type { AssembleQuizResponse, QuizQuestion, SelectedPayload, SubmitStageResponse, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
 
 // Splits the (already randomized) question list into fixed-size stages,
@@ -16,6 +17,38 @@ function chunkIntoStages(qs: QuizQuestion[], stageSize: number): QuizQuestion[][
 }
 
 const LETTERS = "ABCDEFGH";
+
+// In-progress answer for one question, kept separately from the
+// on-the-wire shape (SelectedPayload / selectedOptionId) - this is what
+// the on-screen controls actually manipulate as the player works through
+// a question. mcq/true_false use "option"; fill_blank/missing_number/
+// missing_spelling/short_answer/long_answer use "text"; match_column
+// uses "pairs" (built up one tap at a time - see the match-column UI
+// below).
+type DraftAnswer =
+  | { kind: "option"; optionId: string }
+  | { kind: "text"; text: string }
+  | { kind: "pairs"; pairs: [number, number][] };
+
+function isQuestionAnswered(question: QuizQuestion, answer: DraftAnswer | undefined): boolean {
+  if (!answer) return false;
+  if (answer.kind === "option") return answer.optionId.length > 0;
+  if (answer.kind === "text") return answer.text.trim().length > 0;
+  // match_column: answered once every left item has been paired with
+  // something - partial pairing (e.g. 2 of 5 done) doesn't count yet.
+  const total = question.answerPayload?.left?.length ?? 0;
+  return total > 0 && answer.pairs.length >= total;
+}
+
+function toSubmittedAnswer(
+  questionId: string,
+  answer: DraftAnswer | undefined
+): { questionId: string; selectedOptionId?: string; selectedPayload?: SelectedPayload } {
+  if (!answer) return { questionId };
+  if (answer.kind === "option") return { questionId, selectedOptionId: answer.optionId };
+  if (answer.kind === "text") return { questionId, selectedPayload: { text: answer.text } };
+  return { questionId, selectedPayload: { pairs: answer.pairs } };
+}
 
 export function Quiz({
   quiz,
@@ -34,7 +67,7 @@ export function Quiz({
   // "Explain this to me" on a wrong answer - Section 10 step 7. Only
   // wired up when quiz.classId is actually set (see AssembleQuizResponse)
   // - the app's own UI always supplies one, but the type keeps it
-  // nullable since the backend route itself doesn't require it.
+  // nullable since the backend route itself doesn't require one.
   onExplain: (context: TutorQuestionContext) => void;
 }) {
   const stages = useMemo(() => chunkIntoStages(quiz.questions, quiz.stageSize), [quiz.questions, quiz.stageSize]);
@@ -43,7 +76,7 @@ export function Quiz({
   // start at that stage instead of stage 1, so the player picks up
   // exactly where they left off rather than redoing cleared stages.
   const [currentStageIndex, setCurrentStageIndex] = useState(quiz.stagesCleared ?? 0);
-  const [selections, setSelections] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, DraftAnswer>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Set right after a non-final stage is scored - shows the "stage
@@ -56,16 +89,55 @@ export function Quiz({
   // currentStageIndex which tracks which stage.
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const question = currentStage[currentQuestionIndex];
-  const isAnswered = question ? !!selections[question.id] : false;
+  const isAnswered = question ? isQuestionAnswered(question, answers[question.id]) : false;
   const isLastQuestion = currentQuestionIndex === currentStage.length - 1;
-  const allAnswered = currentStage.every((q) => selections[q.id]);
+  const allAnswered = currentStage.every((q) => isQuestionAnswered(q, answers[q.id]));
+
+  // match_column's "tap a left item, then tap a right item to pair them"
+  // flow needs to know which left item is currently armed - reset
+  // whenever the on-screen question changes so an armed selection from
+  // one match-the-column question never bleeds into the next.
+  const [armedLeftIndex, setArmedLeftIndex] = useState<number | null>(null);
+  useEffect(() => {
+    setArmedLeftIndex(null);
+  }, [question?.id]);
+
+  function setTextAnswer(questionId: string, text: string) {
+    setAnswers((prev) => ({ ...prev, [questionId]: { kind: "text", text } }));
+  }
+
+  function pickOption(questionId: string, optionId: string) {
+    setAnswers((prev) => ({ ...prev, [questionId]: { kind: "option", optionId } }));
+  }
+
+  function toggleArmLeft(leftIndex: number) {
+    setArmedLeftIndex((prev) => (prev === leftIndex ? null : leftIndex));
+  }
+
+  function pairWithRight(questionId: string, rightIndex: number) {
+    if (armedLeftIndex === null) return;
+    setAnswers((prev) => {
+      const existing = prev[questionId];
+      const pairs = existing?.kind === "pairs" ? existing.pairs.filter(([l]) => l !== armedLeftIndex) : [];
+      return { ...prev, [questionId]: { kind: "pairs", pairs: [...pairs, [armedLeftIndex, rightIndex]] } };
+    });
+    setArmedLeftIndex(null);
+  }
+
+  function unpairLeft(questionId: string, leftIndex: number) {
+    setAnswers((prev) => {
+      const existing = prev[questionId];
+      if (existing?.kind !== "pairs") return prev;
+      return { ...prev, [questionId]: { kind: "pairs", pairs: existing.pairs.filter(([l]) => l !== leftIndex) } };
+    });
+  }
 
   async function finishStage() {
     setSubmitting(true);
     setError(null);
     try {
-      const answers = currentStage.map((q) => ({ questionId: q.id, selectedOptionId: selections[q.id] }));
-      const result = await submitStage({ attemptId: quiz.attemptId, answers });
+      const stageAnswers = currentStage.map((q) => toSubmittedAnswer(q.id, answers[q.id]));
+      const result = await submitStage({ attemptId: quiz.attemptId, answers: stageAnswers });
       if (result.isComplete) {
         onSubmitted(quiz.attemptId);
       } else {
@@ -90,7 +162,7 @@ export function Quiz({
   function retryStage() {
     setStageResult(null);
     setCurrentQuestionIndex(0);
-    setSelections((prev) => {
+    setAnswers((prev) => {
       const next = { ...prev };
       for (const q of currentStage) delete next[q.id];
       return next;
@@ -146,66 +218,24 @@ export function Quiz({
               {stageResult.answers.map((a) => {
                 reviewNumber += 1;
                 return (
-                  <li key={a.questionId} className="rounded-2xl bg-secondary/60 p-4">
-                    <div className="flex items-start gap-3">
-                      <span
-                        className={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold ${
-                          a.isCorrect ? "bg-emerald text-background" : "bg-primary/25 text-primary"
-                        }`}
-                      >
-                        {a.isCorrect ? <Check className="size-4" strokeWidth={3} /> : reviewNumber}
-                      </span>
-                      <div className="flex-1">
-                        <p className="text-sm font-semibold">{a.questionText}</p>
-                        <div className="mt-2 flex flex-col gap-1">
-                          {a.options.map((opt) => {
-                            const isSelected = opt.id === a.selectedOptionId;
-                            const isCorrectOption = opt.id === a.correctOptionId;
-                            return (
-                              <p
-                                key={opt.id}
-                                className={`text-sm ${
-                                  isCorrectOption
-                                    ? "font-semibold text-emerald"
-                                    : isSelected
-                                      ? "text-destructive"
-                                      : "text-muted-foreground"
-                                }`}
-                              >
-                                {isSelected ? "→ " : ""}
-                                {opt.text}
-                                {isCorrectOption ? " (correct)" : ""}
-                              </p>
-                            );
-                          })}
-                        </div>
-                        {a.explanation && <p className="mt-2 text-sm text-muted-foreground italic">{a.explanation}</p>}
-                        {a.tip && (
-                          <p className="mt-2 rounded-xl bg-primary/12 p-3 text-sm text-primary">
-                            <strong>Tip:</strong> {a.tip}
-                          </p>
-                        )}
-                        {!a.isCorrect && quiz.classId && (
-                          <button
-                            onClick={() =>
-                              onExplain({
-                                classId: quiz.classId!,
-                                subjectId: quiz.subjectId,
-                                subjectName: quiz.subjectName,
-                                questionId: a.questionId,
-                                questionText: a.questionText,
-                                attemptId: quiz.attemptId,
-                              })
-                            }
-                            className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
-                          >
-                            <MessageCircle className="size-3.5" />
-                            Explain this to me
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </li>
+                  <AnswerReviewCard
+                    key={a.questionId}
+                    answer={a}
+                    displayNumber={reviewNumber}
+                    onExplain={
+                      quiz.classId
+                        ? () =>
+                            onExplain({
+                              classId: quiz.classId!,
+                              subjectId: quiz.subjectId,
+                              subjectName: quiz.subjectName,
+                              questionId: a.questionId,
+                              questionText: a.questionText,
+                              attemptId: quiz.attemptId,
+                            })
+                        : undefined
+                    }
+                  />
                 );
               })}
             </ol>
@@ -226,6 +256,8 @@ export function Quiz({
       </main>
     );
   }
+
+  const draft = question ? answers[question.id] : undefined;
 
   return (
     <main className="night-sky relative min-h-screen overflow-hidden pb-24">
@@ -278,22 +310,108 @@ export function Quiz({
               className="animate-pop-in rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest sm:p-7"
             >
               <h2 className="text-lg leading-snug font-semibold sm:text-xl">{question.questionText}</h2>
-              <div className="mt-5 grid gap-3">
-                {question.options.map((opt, i) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => setSelections((prev) => ({ ...prev, [question.id]: opt.id }))}
-                    className={`rounded-2xl border-2 px-5 py-3.5 text-left font-semibold transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
-                      selections[question.id] === opt.id
-                        ? "border-primary bg-primary/15 text-primary"
-                        : "border-border bg-secondary/60"
-                    }`}
-                  >
-                    <span className="mr-3 text-muted-foreground">{LETTERS[i] ?? ""}</span>
-                    {opt.text}
-                  </button>
-                ))}
-              </div>
+              {question.imageUrl && (
+                <img src={question.imageUrl} alt="" className="mt-4 max-h-64 w-full rounded-2xl object-contain" />
+              )}
+
+              {(question.questionType === "mcq" || question.questionType === "true_false") && (
+                <div className="mt-5 grid gap-3">
+                  {question.options.map((opt, i) => (
+                    <button
+                      key={opt.id}
+                      onClick={() => pickOption(question.id, opt.id)}
+                      className={`rounded-2xl border-2 px-5 py-3.5 text-left font-semibold transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
+                        draft?.kind === "option" && draft.optionId === opt.id
+                          ? "border-primary bg-primary/15 text-primary"
+                          : "border-border bg-secondary/60"
+                      }`}
+                    >
+                      {question.questionType === "mcq" && <span className="mr-3 text-muted-foreground">{LETTERS[i] ?? ""}</span>}
+                      {opt.text}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {(question.questionType === "fill_blank" ||
+                question.questionType === "missing_number" ||
+                question.questionType === "missing_spelling") && (
+                <div className="mt-5">
+                  <input
+                    value={draft?.kind === "text" ? draft.text : ""}
+                    onChange={(e) => setTextAnswer(question.id, e.target.value)}
+                    placeholder="Type your answer"
+                    autoCapitalize={question.questionType === "missing_spelling" ? "none" : undefined}
+                    className="w-full rounded-2xl border-2 border-border bg-secondary/60 px-5 py-3.5 text-lg font-semibold outline-none focus-visible:border-primary"
+                  />
+                </div>
+              )}
+
+              {(question.questionType === "short_answer" || question.questionType === "long_answer") && (
+                <div className="mt-5">
+                  <textarea
+                    value={draft?.kind === "text" ? draft.text : ""}
+                    onChange={(e) => setTextAnswer(question.id, e.target.value)}
+                    placeholder="Write your answer"
+                    rows={question.questionType === "long_answer" ? 6 : 3}
+                    className="w-full rounded-2xl border-2 border-border bg-secondary/60 px-5 py-3.5 font-sans text-[15px] leading-relaxed outline-none focus-visible:border-primary"
+                  />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    This isn't marked right or wrong - your spelling and a model answer are shown once you finish the stage.
+                  </p>
+                </div>
+              )}
+
+              {question.questionType === "match_column" && question.answerPayload?.left && (
+                <div className="mt-5">
+                  <p className="mb-3 text-sm text-muted-foreground">Tap an item on the left, then tap its match on the right.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-2">
+                      {question.answerPayload.left.map((text, li) => {
+                        const pairs = draft?.kind === "pairs" ? draft.pairs : [];
+                        const pairedRight = pairs.find(([l]) => l === li);
+                        const isArmed = armedLeftIndex === li;
+                        return (
+                          <button
+                            key={li}
+                            onClick={() => (pairedRight ? unpairLeft(question.id, li) : toggleArmLeft(li))}
+                            className={`rounded-xl border-2 px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
+                              pairedRight
+                                ? "border-primary bg-primary/15 text-primary"
+                                : isArmed
+                                  ? "border-primary bg-primary/25 text-primary"
+                                  : "border-border bg-secondary/60"
+                            }`}
+                          >
+                            {text}
+                            {pairedRight ? " ✓" : ""}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {(question.answerPayload.right ?? []).map((text, ri) => {
+                        const pairs = draft?.kind === "pairs" ? draft.pairs : [];
+                        const usedByLeft = pairs.find(([, r]) => r === ri)?.[0];
+                        const isUsed = usedByLeft !== undefined;
+                        return (
+                          <button
+                            key={ri}
+                            onClick={() => (isUsed ? unpairLeft(question.id, usedByLeft) : pairWithRight(question.id, ri))}
+                            disabled={!isUsed && armedLeftIndex === null}
+                            className={`rounded-xl border-2 px-3 py-2.5 text-left text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                              isUsed ? "border-primary bg-primary/15 text-primary" : "border-border bg-secondary/60"
+                            }`}
+                          >
+                            {text}
+                            {isUsed ? " ✓" : ""}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
           </div>
         )}
@@ -329,7 +447,7 @@ export function Quiz({
               </Button>
             )}
           </div>
-          {!isAnswered && <p className="mt-3 text-sm text-muted-foreground">Choose an answer to continue.</p>}
+          {!isAnswered && <p className="mt-3 text-sm text-muted-foreground">Answer this question to continue.</p>}
           {error && <p className="mt-3 text-sm font-medium text-destructive">{error}</p>}
         </div>
       </div>

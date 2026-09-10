@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, MessageCircle, PartyPopper, Sparkles } from "lucide-react";
+import { ArrowRight, PartyPopper, Sparkles } from "lucide-react";
 import { assembleQuiz, getResults } from "../api";
+import { AnswerReviewCard } from "../components/AnswerReviewCard";
 import type { AssembleQuizResponse, Profile, QuestJourney, QuizResults, ResultsAnswer, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
 
@@ -138,66 +139,24 @@ export function Results({
                 {group.answers.map((a) => {
                   answerNumber += 1;
                   return (
-                    <li key={a.questionId} className="rounded-2xl bg-secondary/60 p-4">
-                      <div className="flex items-start gap-3">
-                        <span
-                          className={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold ${
-                            a.isCorrect ? "bg-emerald text-background" : "bg-primary/25 text-primary"
-                          }`}
-                        >
-                          {a.isCorrect ? <Check className="size-4" strokeWidth={3} /> : answerNumber}
-                        </span>
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold">{a.questionText}</p>
-                          <div className="mt-2 flex flex-col gap-1">
-                            {a.options.map((opt) => {
-                              const isSelected = opt.id === a.selectedOptionId;
-                              const isCorrectOption = opt.id === a.correctOptionId;
-                              return (
-                                <p
-                                  key={opt.id}
-                                  className={`text-sm ${
-                                    isCorrectOption
-                                      ? "font-semibold text-emerald"
-                                      : isSelected
-                                        ? "text-destructive"
-                                        : "text-muted-foreground"
-                                  }`}
-                                >
-                                  {isSelected ? "→ " : ""}
-                                  {opt.text}
-                                  {isCorrectOption ? " (correct)" : ""}
-                                </p>
-                              );
-                            })}
-                          </div>
-                          {a.explanation && <p className="mt-2 text-sm text-muted-foreground italic">{a.explanation}</p>}
-                          {a.tip && (
-                            <p className="mt-2 rounded-xl bg-primary/12 p-3 text-sm text-primary">
-                              <strong>Tip:</strong> {a.tip}
-                            </p>
-                          )}
-                          {!a.isCorrect && a.questionText && results.classId && (
-                            <button
-                              onClick={() =>
-                                onExplain({
-                                  classId: results.classId!,
-                                  subjectId: results.subjectId,
-                                  subjectName: results.subjectName ?? "",
-                                  questionId: a.questionId,
-                                  questionText: a.questionText!,
-                                  attemptId,
-                                })
-                              }
-                              className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
-                            >
-                              <MessageCircle className="size-3.5" />
-                              Explain this to me
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </li>
+                    <AnswerReviewCard
+                      key={a.questionId}
+                      answer={a}
+                      displayNumber={answerNumber}
+                      onExplain={
+                        a.questionText && results.classId
+                          ? () =>
+                              onExplain({
+                                classId: results.classId!,
+                                subjectId: results.subjectId,
+                                subjectName: results.subjectName ?? "",
+                                questionId: a.questionId,
+                                questionText: a.questionText!,
+                                attemptId,
+                              })
+                          : undefined
+                      }
+                    />
                   );
                 })}
               </ol>

@@ -27,10 +27,37 @@ export type QuizOption = {
   text: string;
 };
 
+// One misspelled word flagged in a short/long answer, with nspell's own
+// suggested corrections - see apps/api/src/lib/spellcheck.ts.
+export type SpellingIssue = {
+  word: string;
+  suggestions: string[];
+};
+
+// What the player actually submits for one non-mcq/true_false question -
+// a typed string for fill_blank/missing_number/missing_spelling/short_
+// answer/long_answer, or the pairs built for match_column ([leftIndex,
+// rightIndex] per pair). Mirrors apps/api/src/lib/scoring.ts's
+// SubmittedAnswer.selectedPayload shape.
+export type SelectedPayload = {
+  text?: string;
+  pairs?: [number, number][];
+};
+
 export type QuizQuestion = {
   id: string;
   questionText: string;
+  questionType: QuestionType;
+  // mcq/true_false only - empty for every other type (see api.ts's
+  // assembleQuiz/resumeQuiz and the backend's own assemblyAnswerPayload,
+  // which strips out the actual answer for the other 6 types).
   options: QuizOption[];
+  // Only ever set for match_column ({left, right} - the two lists to
+  // build pairs from), and even then never carries correctPairs - see
+  // apps/api/src/routes/quizzes.ts's assemblyAnswerPayload for exactly
+  // what's withheld and why, same spoiler concern as correctOptionId.
+  answerPayload: AnswerPayload | null;
+  imageUrl: string | null;
   documentId: string;
   // The shared reading passage/story this question refers back to, when
   // it came from a comprehension-style document (e.g. English papers).
@@ -88,12 +115,26 @@ export type QuestJourney = {
 export type StageAnswerReview = {
   questionId: string;
   questionText: string;
+  questionType: QuestionType;
   options: QuizOption[];
-  selectedOptionId: string;
+  // Set for mcq/true_false; null for every other type, which answers via
+  // selectedPayload instead.
+  selectedOptionId: string | null;
+  selectedPayload: unknown;
   correctOptionId: string;
+  // Unlike QuizQuestion.answerPayload above, this is the FULL payload
+  // (including acceptedAnswers/correctPairs/rubricKeyPoints) - safe here
+  // since the question has already been answered and this is the review.
+  answerPayload: AnswerPayload | null;
   explanation: string;
   tip: string | null;
   isCorrect: boolean;
+  // Null for short_answer/long_answer (excluded from scoring - see
+  // apps/api/src/lib/scoring.ts); a fraction (0-1) for match_column's
+  // partial credit; exactly 0 or 1 for every other graded type.
+  score: number | null;
+  // Only ever set for short_answer/long_answer.
+  spellingIssues: SpellingIssue[] | null;
 };
 
 // Response from submitting one stage's worth of answers. `score` /
@@ -123,14 +164,19 @@ export type SubmitStageResponse = {
 export type ResultsAnswer = {
   questionId: string;
   questionText: string | null;
+  questionType: QuestionType;
   options: QuizOption[];
-  selectedOptionId: string;
+  selectedOptionId: string | null;
+  selectedPayload: unknown;
   correctOptionId: string | null;
+  answerPayload: AnswerPayload | null;
   explanation: string | null;
   // The memorable trick/strategy for this question - only populated for a
   // wrong answer (see apps/api/src/routes/quizzes.ts's /results handler).
   tip: string | null;
   isCorrect: boolean;
+  score: number | null;
+  spellingIssues: SpellingIssue[] | null;
   documentId: string | null;
   passage: string | null;
 };
