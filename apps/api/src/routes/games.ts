@@ -35,6 +35,17 @@ const GAME_DEFINITIONS: Record<string, { questionTypes: QuestionTypeValue[]; top
   prefix_suffix_builder: { questionTypes: ["fill_blank"], topic: "Prefixes & Suffixes" },
 };
 
+// Shared by GET /games/round and GET /games/available, so "does this game
+// have any matching content" and "assemble a round for it" always agree
+// on exactly what counts.
+function conditionsFor(definition: { questionTypes: QuestionTypeValue[]; topic?: string }, subjectId: string | undefined, classId: string | undefined) {
+  const conditions = [inArray(questions.questionType, definition.questionTypes)];
+  if (subjectId) conditions.push(eq(questions.subjectId, subjectId));
+  if (classId) conditions.push(eq(documents.classId, classId));
+  if (definition.topic) conditions.push(sql`${questions.topics} @> ARRAY[${definition.topic}]::text[]`);
+  return conditions;
+}
+
 // Fisher-Yates, same as quizzes.ts's shuffled() (duplicated rather than
 // imported - it's not exported there, and this is the only other place
 // that needs it).
@@ -71,10 +82,7 @@ export async function gameRoutes(app: FastifyInstance) {
       subjectId = subject.id;
     }
 
-    const conditions = [inArray(questions.questionType, definition.questionTypes)];
-    if (subjectId) conditions.push(eq(questions.subjectId, subjectId));
-    if (classId) conditions.push(eq(documents.classId, classId));
-    if (definition.topic) conditions.push(sql`${questions.topics} @> ARRAY[${definition.topic}]::text[]`);
+    const conditions = conditionsFor(definition, subjectId, classId);
 
     const picked = await db
       .select({
@@ -122,6 +130,38 @@ export async function gameRoutes(app: FastifyInstance) {
         imageUrl: q.imageUrl,
       })),
     });
+  });
+
+  // Which of the 5 games actually have at least one matching question for
+  // this class+subject right now - drives the Arcade menu so it only ever
+  // offers a game that will actually have content, the same "derive from
+  // what's real, not a fixed list" convention /topics already uses (see
+  // routes/classes.ts). Without this, e.g. the two spelling games would
+  // show up as playable for Maths even though no missing_spelling content
+  // is tagged there yet, only to 404 the moment a child tapped Play.
+  app.get<{ Querystring: { classId?: string; subjectName?: string } }>("/games/available", async (request, reply) => {
+    const { classId, subjectName } = request.query;
+
+    let subjectId: string | undefined;
+    if (subjectName) {
+      const [subject] = await db.select().from(subjects).where(eq(subjects.name, subjectName)).limit(1);
+      if (!subject) return reply.status(404).send({ error: `No subject named "${subjectName}"` });
+      subjectId = subject.id;
+    }
+
+    const results = await Promise.all(
+      Object.entries(GAME_DEFINITIONS).map(async ([key, definition]) => {
+        const [row] = await db
+          .select({ id: questions.id })
+          .from(questions)
+          .innerJoin(documents, eq(questions.documentId, documents.id))
+          .where(and(...conditionsFor(definition, subjectId, classId)))
+          .limit(1);
+        return row ? key : null;
+      })
+    );
+
+    return reply.send({ games: results.filter((k): k is string => k !== null) });
   });
 
   // Record a finished round and award stars - the child (or the frontend,

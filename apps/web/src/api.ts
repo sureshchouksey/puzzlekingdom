@@ -270,6 +270,14 @@ export function getGameRound(params: { game: GameKey; classId?: string; subjectN
   return apiFetch(`/games/round${buildQuery(params)}`).then((res) => asJson(res));
 }
 
+// Which games have real content for this class+subject right now - see
+// routes/games.ts's own comment. Drives the Arcade menu so a game with
+// nothing behind it (yet) simply isn't offered, rather than 404ing the
+// moment it's tapped.
+export function getAvailableGames(params: { classId?: string; subjectName?: string }): Promise<GameKey[]> {
+  return apiFetch(`/games/available${buildQuery(params)}`).then((res) => asJson<{ games: GameKey[] }>(res)).then((r) => r.games);
+}
+
 // Reports one finished round and returns the stars it earned (same
 // star-band as a graded quiz stage - see lib/scoring.ts's
 // starsForPercent) - these fold into the leaderboard total alongside

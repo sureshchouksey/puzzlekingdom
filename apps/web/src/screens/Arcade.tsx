@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Blocks, CheckCircle2, Ear, Flame, Link2, PenLine, SpellCheck, Star, X } from "lucide-react";
-import { getGameRound, recordGameAttempt } from "../api";
+import { getAvailableGames, getGameRound, recordGameAttempt } from "../api";
 import type { GameKey, GameQuestion, PkClass, Profile } from "../types";
 import { Button } from "../components/ui/button";
 
@@ -139,9 +139,26 @@ export function Arcade({
   onExit: () => void;
 }) {
   const [gameKey, setGameKey] = useState<GameKey | null>(null);
+  // Which games actually have content for this class+subject - fetched
+  // fresh whenever the subject changes, same "derive from what's real"
+  // pattern SubjectPicker already uses for topics. Null while loading, []
+  // once loaded but nothing's available yet - both are handled by
+  // GameMenu below rather than showing every game unconditionally
+  // (previously Spelling Sprint/Missing Letters showed up even for
+  // subjects with zero missing_spelling content).
+  const [availableGames, setAvailableGames] = useState<GameKey[] | null>(null);
+  const [availableError, setAvailableError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAvailableGames(null);
+    setAvailableError(null);
+    getAvailableGames({ classId: pkClass.id, subjectName })
+      .then(setAvailableGames)
+      .catch((err) => setAvailableError(err instanceof Error ? err.message : "Failed to check which games are ready"));
+  }, [pkClass.id, subjectName]);
 
   if (gameKey === null) {
-    return <GameMenu onPick={setGameKey} onExit={onExit} />;
+    return <GameMenu availableGames={availableGames} error={availableError} onPick={setGameKey} onExit={onExit} />;
   }
 
   return (
@@ -157,11 +174,51 @@ export function Arcade({
   );
 }
 
-function GameMenu({ onPick, onExit }: { onPick: (key: GameKey) => void; onExit: () => void }) {
+function GameMenu({
+  availableGames,
+  error,
+  onPick,
+  onExit,
+}: {
+  availableGames: GameKey[] | null;
+  error: string | null;
+  onPick: (key: GameKey) => void;
+  onExit: () => void;
+}) {
+  if (error) {
+    return (
+      <section className="mx-auto mt-10 w-full max-w-xl flex-1 text-center">
+        <p className="text-muted-foreground">{error}</p>
+        <div className="mt-6">
+          <Button variant="secondary" onClick={onExit}>
+            <ArrowLeft className="size-4" /> Back
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
+  if (availableGames === null) {
+    return <section className="mx-auto mt-10 w-full max-w-xl flex-1 text-center text-muted-foreground">Loading the Arcade...</section>;
+  }
+
+  if (availableGames.length === 0) {
+    return (
+      <section className="mx-auto mt-10 w-full max-w-xl flex-1 text-center">
+        <p className="text-muted-foreground">No Arcade games are ready for this subject yet - ask an adult to add some content in the admin dashboard.</p>
+        <div className="mt-6">
+          <Button variant="secondary" onClick={onExit}>
+            <ArrowLeft className="size-4" /> Back
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="mx-auto mt-10 w-full max-w-2xl flex-1">
       <div className="grid gap-5 sm:grid-cols-2">
-        {(Object.keys(GAME_META) as GameKey[]).map((key, i) => {
+        {availableGames.map((key, i) => {
           const meta = GAME_META[key];
           const Icon = meta.icon;
           return (
