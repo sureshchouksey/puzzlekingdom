@@ -102,13 +102,19 @@ export function Leaderboard({ onBack }: { onBack: () => void }) {
                 <div className="flex-1">
                   <p className="font-display font-bold">{e.name}</p>
                   <p className="text-sm text-muted-foreground">
-                    {e.quizzesPlayed} {e.quizzesPlayed === 1 ? "quiz" : "quizzes"} ·{" "}
+                    {e.quizzesPlayed} {e.quizzesPlayed === 1 ? "quiz" : "quizzes"} · {e.stagesCleared}{" "}
+                    {e.stagesCleared === 1 ? "stage" : "stages"} cleared ·{" "}
                     {e.accuracy === null ? "—" : `${Math.round(e.accuracy * 100)}% accuracy`}
                   </p>
                 </div>
+                {/* The ranking metric itself (rows already arrive sorted
+                    by this - see leaderboard.ts) - stars earned is what
+                    should be prominent here, not stagesCleared, which
+                    moved into the muted subtitle line above instead of
+                    being dropped. */}
                 <div className="text-right">
-                  <p className="text-xl font-bold text-primary">{e.stagesCleared}</p>
-                  <p className="text-xs text-muted-foreground">stages cleared</p>
+                  <p className="text-xl font-bold text-primary">⭐ {e.starsEarned}</p>
+                  <p className="text-xs text-muted-foreground">stars earned</p>
                 </div>
               </li>
             ))}

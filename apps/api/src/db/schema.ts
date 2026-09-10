@@ -6,6 +6,25 @@ import { relations } from "drizzle-orm";
 
 export const documentStatus = pgEnum("document_status", ["uploaded", "processing", "ready", "failed"]);
 
+// Alongside the original MCQ, per
+// plan/Question-Types-and-Content-Authoring-Plan.md ("Data model
+// recommendation"). MCQ and true_false both keep using the existing
+// options/correctOptionId columns (true_false is just an MCQ with two
+// options, rendered as a toggle) - answerPayload is only used by the
+// genuinely new shapes below.
+export const questionType = pgEnum("question_type", [
+  "mcq",
+  "true_false",
+  "fill_blank",
+  "missing_number",
+  "missing_spelling",
+  "match_column",
+  "short_answer",
+  "long_answer",
+]);
+
+export const topicDifficulty = pgEnum("topic_difficulty", ["beginner", "medium", "hard"]);
+
 // The audience a piece of content targets - e.g. "11+ Grammar Prep" for
 // CSSE/CCHS exam content, or "Year 3" for National Curriculum course
 // content. Nested above subject: the same subject (Maths, English) exists
@@ -18,6 +37,23 @@ export const classes = pgTable("classes", {
 export const subjects = pgTable("subjects", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull().unique(),
+});
+
+// A real, ordered topic within one class+subject - replaces inventing
+// topic structure out of questions.topics' free-text tag array (that
+// column stays as-is for now; nothing here backfills or reads from it
+// yet). displayOrder drives the quest map's node sequence
+// (Lovable-Design-Migration-Plan.md Phase 2); difficulty drives the
+// Beginner/Medium/Hard reward-system labels
+// (Question-Types-and-Content-Authoring-Plan.md).
+export const topics = pgTable("topics", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  classId: uuid("class_id").notNull().references(() => classes.id),
+  subjectId: uuid("subject_id").notNull().references(() => subjects.id),
+  name: text("name").notNull(),
+  displayOrder: integer("display_order").notNull().default(0),
+  difficulty: topicDifficulty("difficulty").notNull().default("beginner"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // A lightweight named player, not a real account - no password, no login.
@@ -96,6 +132,20 @@ export const questions = pgTable("questions", {
   // G BIV..."), distinct from `explanation` (which states the factual
   // answer). Surfaced especially on a wrong answer, in the results review.
   tip: text("tip"),
+  // Defaults to "mcq" for every pre-existing row (see migration 0017) -
+  // mcq/true_false answers stay in options/correctOptionId above;
+  // answerPayload below is only populated for the newer types.
+  questionType: questionType("question_type").notNull().default("mcq"),
+  // Flexible per-type answer shape - see the data model table in
+  // plan/Question-Types-and-Content-Authoring-Plan.md for what each
+  // questionType actually stores here (e.g. { acceptedAnswers: string[] }
+  // for fill_blank, { left, right, correctPairs } for match_column).
+  // Null for mcq/true_false, which don't need it.
+  answerPayload: jsonb("answer_payload").$type<Record<string, unknown>>(),
+  // Nullable - only Non-Verbal Reasoning content (Phase 2) needs this so
+  // far, but added now (migration 0017) so that phase doesn't need its
+  // own schema migration just for this one column.
+  imageUrl: text("image_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -140,14 +190,44 @@ export const quizAttempts = pgTable("quiz_attempts", {
   // topics are edited later, and so /reports can aggregate cheaply across
   // many attempts. Null until the attempt is submitted.
   topicBreakdown: jsonb("topic_breakdown").$type<Record<string, { correct: number; total: number }>>(),
+  // Running total across this attempt's stages, incremented as each is
+  // scored (see the star bands in
+  // Question-Types-and-Content-Authoring-Plan.md, layered on top of the
+  // existing stage pass gate). Summed per profile once the leaderboard
+  // switches to a stars-based ranking (build order step 6) - not read
+  // anywhere yet.
+  starsEarned: integer("stars_earned").notNull().default(0),
 });
 
 export const quizAttemptAnswers = pgTable("quiz_attempt_answers", {
   id: uuid("id").primaryKey().defaultRandom(),
   attemptId: uuid("attempt_id").notNull().references(() => quizAttempts.id),
   questionId: uuid("question_id").notNull().references(() => questions.id, { onDelete: "cascade" }),
-  selectedOptionId: text("selected_option_id").notNull(),
+  // Only set for mcq/true_false - every other question_type submits
+  // selectedPayload instead (see schema comment there).
+  selectedOptionId: text("selected_option_id"),
+  // The submitted answer for every type other than mcq/true_false: a
+  // typed-in string for fill_blank/missing_number/missing_spelling/
+  // short_answer/long_answer ({ text: string }), or match_column's picked
+  // pairs ({ pairs: [leftIdx, rightIdx][] }).
+  selectedPayload: jsonb("selected_payload"),
   isCorrect: boolean("is_correct").notNull(),
+  // What actually gets summed for a stage's pass/fail percentage instead
+  // of counting isCorrect booleans: 1 or 0 for the binary types (always
+  // equal to isCorrect, so today's all-MCQ data behaves exactly as
+  // before), a fraction for match_column's partial credit, and null for
+  // short/long answer - excluded from the stage total entirely rather
+  // than counted as a 0 (see "Scoring-engine impact" in
+  // Question-Types-and-Content-Authoring-Plan.md).
+  score: real("score"),
+  // Dictionary-based spelling feedback (lib/spellcheck.ts) for
+  // short_answer/long_answer submissions only - populated regardless of
+  // score (which stays null for these types), since spelling feedback is
+  // shown "regardless of whether the answer counts toward the score" per
+  // the grading-decision section of
+  // Question-Types-and-Content-Authoring-Plan.md. Null for every other
+  // question_type.
+  spellingIssues: jsonb("spelling_issues").$type<{ word: string; suggestions: string[] }[]>(),
 });
 
 // The "how do you actually solve this kind of problem" method/formula
@@ -174,6 +254,7 @@ export const conceptGuides = pgTable("concept_guides", {
 export const classesRelations = relations(classes, ({ many }) => ({
   documents: many(documents),
   conceptGuides: many(conceptGuides),
+  topics: many(topics),
 }));
 
 export const subjectsRelations = relations(subjects, ({ many }) => ({
@@ -181,6 +262,7 @@ export const subjectsRelations = relations(subjects, ({ many }) => ({
   questions: many(questions),
   attempts: many(quizAttempts),
   conceptGuides: many(conceptGuides),
+  topics: many(topics),
 }));
 
 export const profilesRelations = relations(profiles, ({ many }) => ({
@@ -216,6 +298,11 @@ export const quizAttemptAnswersRelations = relations(quizAttemptAnswers, ({ one 
 export const conceptGuidesRelations = relations(conceptGuides, ({ one }) => ({
   class: one(classes, { fields: [conceptGuides.classId], references: [classes.id] }),
   subject: one(subjects, { fields: [conceptGuides.subjectId], references: [subjects.id] }),
+}));
+
+export const topicsRelations = relations(topics, ({ one }) => ({
+  class: one(classes, { fields: [topics.classId], references: [classes.id] }),
+  subject: one(subjects, { fields: [topics.subjectId], references: [subjects.id] }),
 }));
 
 // Section 10 step 5 (plan/AI-Study-Mentor-Agent-Plan.md) - the tutor's
