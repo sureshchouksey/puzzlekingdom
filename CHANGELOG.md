@@ -5,6 +5,56 @@ All notable Puzzle Kingdom releases are recorded here. From v1.0.0 onward,
 branches and lands on `main` at the next tagged release, not commit by
 commit.
 
+## v1.0.7 - 11 September 2026
+
+Everything built on `dev` since v1.0.6, up to and including commit
+`f082153` (the Vercel rewrite config).
+
+### Track 7: family accounts
+
+- Any family can now sign up and log in independently of the single
+  shared platform-admin account: `families`/`family_owners` tables, one
+  or more parent/guardian owners per family from day one, and every
+  `/families/me/*` route scoped to the caller's own family only
+  (application-layer isolation for now, not Postgres RLS - a documented,
+  deliberate deferral, not an oversight).
+- A family owner logs in or signs up with a 4-digit PIN - the same
+  keypad weight as a child profile's own login, not a password - from a
+  single "Parent dashboard" entry point on Welcome. That one screen
+  decides client-side whether a typed identifier is a family owner's
+  email (PIN login/signup) or the platform admin's username (unchanged
+  password login), so there's no separate "Family login" link anymore
+  and no new lookup endpoint.
+- A family dashboard lists just that family's own children, with an
+  "add a child" flow and PIN entry to actually play as one. A
+  family-created child can also log straight in from Welcome's own name
+  flow afterward, same as any other profile.
+- A one-time CLI (`create-family`) creates or resets a family owner's
+  PIN and backfills any existing profile with no family into one - used
+  to bring this app's original 13 profiles under a single family.
+
+### Feature flags & admin dashboard
+
+- A master Arcade on/off switch, one toggle per Arcade game, and a
+  separate Study Buddy fun-content toggle, all managed from a new admin
+  Features tab and enforced on both the backend (a disabled feature
+  403s or declines, not just hides) and the frontend.
+- Fixed: admin delete/reset confirmations that were silently doing
+  nothing in some browser contexts, replaced with a real in-app confirm
+  dialog; fixed a delete-ordering bug that 500'd when deleting a profile
+  with a Study Buddy conversation linked to one of its own quiz
+  attempts; added a "Clear" action for stale Study Buddy growth-insight
+  rows.
+- Manual question upload ("I already have questions") now supports all
+  8 question types, not just multiple choice, sharing the same
+  type-aware authoring UI and validation the admin Questions tab
+  already used.
+
+### Ops
+
+- A Vercel rewrite config so a direct load or refresh on a client-side
+  route (e.g. `/admin`) doesn't 404.
+
 ## v1.0.0 - 10 September 2026
 
 The first tagged release. Everything built up to and including commit
