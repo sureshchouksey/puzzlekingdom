@@ -5,6 +5,44 @@ All notable Puzzle Kingdom releases are recorded here. From v1.0.0 onward,
 branches and lands on `main` at the next tagged release, not commit by
 commit.
 
+## v1.0.8 - 11 September 2026
+
+Everything built on `dev` since v1.0.7, commit `739f084`.
+
+### Activity time tracking (family & admin metrics dashboards)
+
+- New `activity_heartbeats` table (migration 0026) recording a ~30s
+  server-side ping while a child has Quiz, Arcade, Study Buddy, or the
+  subject picker open and foregrounded - the Page Visibility API pauses
+  pings when the tab is backgrounded, so idle time isn't counted.
+- New `GET /metrics/family/summary` (family-owner scoped) and
+  `GET /metrics/admin/overview` (platform-wide) routes, both with
+  day/week/month rolling-window views.
+- A new "Time in the Kingdom" section on the family dashboard, and a new
+  Metrics tab on the admin dashboard.
+- Also includes migration 0027 (per-family feature toggles).
+
+### Admin Questions tab
+
+- A live total-question-count for whatever class/subject/topic/search
+  filter is currently selected, so newly seeded content can be validated
+  right in the admin console instead of via SQL. `GET /admin/questions`
+  now returns `totalCount` alongside its page of results.
+
+### Welcome screen
+
+- Fixed a real production complaint: the name/PIN submit button used to
+  just show "..." for up to a minute during a Render free-tier cold
+  start, reading as frozen. A new "Waking up the kingdom..." message now
+  appears if the request is still pending after 3.5s.
+
+### Content
+
+- Year 3 Verbal Reasoning, Non-Verbal Reasoning, and Religion (300
+  questions), the last two Year 4 subjects (Science, English), and Year
+  5 Maths and English were validated, converted to seed JSON, and
+  seeded to the live database (data only - not part of this repo).
+
 ## v1.0.7 - 11 September 2026
 
 Everything built on `dev` since v1.0.6, up to and including commit
