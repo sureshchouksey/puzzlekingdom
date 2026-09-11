@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Bird,
   CalendarClock,
+  Clock,
   FileUp,
   Gamepad2,
   Key,
@@ -27,6 +28,7 @@ import {
   deleteAdminTopic,
   deleteAdminUser,
   generateTutorInsights,
+  getAdminMetricsOverview,
   getAdminQuestions,
   getAdminTopics,
   getAdminUsers,
@@ -44,11 +46,14 @@ import {
   updateAppSettings,
 } from "../api";
 import type {
+  AdminMetricsOverview,
   AdminQuestion,
   AdminTopic,
   AdminUser,
   AdminUserSummary,
   AppSettings,
+  GameKey,
+  MetricsPeriod,
   PkClass,
   Subject,
   TopicDifficulty,
@@ -58,6 +63,7 @@ import type {
 } from "../types";
 import { Button } from "../components/ui/button";
 import { Upload } from "./Upload";
+import { GAME_META } from "./Arcade";
 import {
   emptyQuestionDraft,
   draftIsValid,
@@ -68,7 +74,7 @@ import {
   type QuestionDraft,
 } from "../questionAuthoring";
 
-type Tab = "questions" | "topics" | "users" | "content" | "studyBuddy" | "features";
+type Tab = "questions" | "topics" | "users" | "content" | "studyBuddy" | "features" | "metrics";
 
 // Fills a QuestionDraft from an existing DB question, for the "edit"
 // flow - Upload.tsx never needs this (it only ever creates new
@@ -172,6 +178,7 @@ const QUESTIONS_PAGE_SIZE = 10;
 
 function QuestionsTab() {
   const [rows, setRows] = useState<AdminQuestion[] | null>(null);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   // Class/subject/topic are proper dropdowns, cascading the same way the
   // rest of the app narrows topic - class and subject pick from the
   // catalog (getClasses/getSubjects, same lists TopicsTab uses), and the
@@ -210,6 +217,7 @@ function QuestionsTab() {
       .then((res) => {
         setRows(res.questions);
         setNextCursor(res.nextCursor);
+        setTotalCount(res.totalCount);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load questions"));
   }
@@ -372,6 +380,17 @@ function QuestionsTab() {
           </Button>
         )}
       </div>
+
+      {/* Live count for whatever class/subject/topic/search is currently
+          selected above - the quick "did the seed actually land" check
+          right in the admin console, no SQL needed. Updates on every
+          load() call (filter change, search, pagination). */}
+      {totalCount !== null && (
+        <p className="mb-4 text-sm font-medium text-muted-foreground">
+          {totalCount} question{totalCount === 1 ? "" : "s"} match{totalCount === 1 ? "es" : ""} this filter
+          {(classId || subjectName || topic || search.trim()) ? "" : " (all subjects)"}
+        </p>
+      )}
 
       {addingDocumentId && addDraft && (
         <div className="mb-4">
@@ -547,6 +566,14 @@ function TopicFormFields({
 }
 
 const DIFFICULTY_LABEL: Record<TopicDifficulty, string> = { beginner: "Beginner", medium: "Medium", hard: "Hard" };
+// Color-codes each difficulty the same way accuracy bars already are
+// elsewhere in this app (emerald/gold/ruby) - literal Tailwind class
+// names so the content scanner picks them up.
+const DIFFICULTY_COLOR: Record<TopicDifficulty, string> = {
+  beginner: "text-emerald",
+  medium: "text-primary",
+  hard: "text-ruby",
+};
 
 // Subject + topic management (build order step 3/7 in
 // Question-Types-and-Content-Authoring-Plan.md) - topics are class+
@@ -737,7 +764,8 @@ function TopicsTab() {
               <div>
                 <p className="font-semibold">{t.name}</p>
                 <p className="text-sm text-muted-foreground">
-                  {t.subjectName} · {t.className} · order {t.displayOrder} · {DIFFICULTY_LABEL[t.difficulty]}
+                  {t.subjectName} · {t.className} · order {t.displayOrder} ·{" "}
+                  <span className={`font-semibold ${DIFFICULTY_COLOR[t.difficulty]}`}>{DIFFICULTY_LABEL[t.difficulty]}</span>
                 </p>
               </div>
               <div className="flex shrink-0 gap-2">
@@ -923,6 +951,19 @@ function timeAgo(iso: string): string {
 // AdminUserSummary data. Search is plain client-side filtering (the
 // roster is one unpaginated GET /admin/users call, unlike Questions'
 // paginated list) rather than another round trip.
+// One accent per stat tile / player row, cycling through the app's own
+// jewel-tone palette - same pattern as FamilyDashboard.tsx's own
+// CHILD_ACCENTS. Written as literal Tailwind class names (not built
+// from a template string) so the content scanner actually picks them
+// up. Shared by UsersTab (stat tiles + per-player avatars) and
+// MetricsTab (stat tiles) below.
+const ACCENTS: { bg: string; text: string; tint: string }[] = [
+  { bg: "bg-ruby", text: "text-ruby", tint: "bg-ruby/15" },
+  { bg: "bg-sapphire", text: "text-sapphire", tint: "bg-sapphire/15" },
+  { bg: "bg-emerald", text: "text-emerald", tint: "bg-emerald/15" },
+  { bg: "bg-amethyst", text: "text-amethyst", tint: "bg-amethyst/15" },
+];
+
 const USERS_PAGE_SIZE = 10;
 
 function UsersTab() {
@@ -1027,13 +1068,18 @@ function UsersTab() {
               value: stats.avgAccuracy !== null ? `${Math.round(stats.avgAccuracy * 100)}%` : "–",
             },
             { icon: Sparkles, label: "Active this week", value: `${stats.activeThisWeek}` },
-          ].map((s) => (
-            <div key={s.label} className="rounded-2xl border border-border bg-card p-5">
-              <s.icon className="size-5 text-primary" />
-              <p className="mt-3 text-3xl font-display font-extrabold">{s.value}</p>
-              <p className="text-sm text-muted-foreground">{s.label}</p>
-            </div>
-          ))}
+          ].map((s, i) => {
+            const accent = ACCENTS[i % ACCENTS.length];
+            return (
+              <div key={s.label} className="rounded-2xl border border-border bg-card p-5">
+                <span className={`grid size-10 place-items-center rounded-full ${accent.tint} ${accent.text}`}>
+                  <s.icon className="size-5" />
+                </span>
+                <p className="mt-3 text-3xl font-display font-extrabold">{s.value}</p>
+                <p className="text-sm text-muted-foreground">{s.label}</p>
+              </div>
+            );
+          })}
         </section>
       )}
 
@@ -1052,14 +1098,16 @@ function UsersTab() {
       )}
 
       <div className="space-y-3">
-        {pagedRows?.map((r) => (
+        {pagedRows?.map((r, i) => {
+          const accent = ACCENTS[i % ACCENTS.length];
+          return (
           <div key={r.profileId} className="rounded-2xl border border-border bg-card p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-center gap-3.5">
                 <img
                   src={usersTabAvatarSrc(r.avatarId, r.title)}
                   alt=""
-                  className="size-14 shrink-0 rounded-xl border-2 border-border bg-secondary object-cover"
+                  className={`size-14 shrink-0 rounded-xl border-2 bg-secondary object-cover ${accent.text} border-current`}
                 />
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -1154,7 +1202,8 @@ function UsersTab() {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {filteredRows && filteredRows.length > USERS_PAGE_SIZE && (
@@ -1445,21 +1494,27 @@ function FlagRow({
   indent?: boolean;
 }) {
   return (
-    <label className={`mb-3 flex items-start gap-2.5 last:mb-0 ${disabled ? "opacity-50" : "cursor-pointer"} ${indent ? "ml-7" : ""}`}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5"
-      />
-      <span>
-        <span className="block font-medium">
+    <div className={`mb-3 flex items-center gap-3 last:mb-0 ${disabled ? "opacity-50" : ""} ${indent ? "ml-7" : ""}`}>
+      <div className="flex-1">
+        <p className="font-medium">
           {label} {checked ? "on" : "off"}
-        </span>
-        {description && <span className="block text-sm text-muted-foreground">{description}</span>}
-      </span>
-    </label>
+        </p>
+        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={`flex h-[26px] w-[46px] shrink-0 items-center rounded-full p-[3px] transition-colors ${checked ? "bg-primary" : "bg-border"} ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+      >
+        <span
+          className={`size-5 rounded-full bg-primary-foreground shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0"}`}
+        />
+      </button>
+    </div>
   );
 }
 
@@ -1601,6 +1656,126 @@ function FeaturesTab() {
   );
 }
 
+// "Xh Ym" (or just "Ym" under an hour) - same small helper as
+// FamilyDashboard.tsx's own copy (not shared - see types.ts's own header
+// comment on why this app doesn't have a shared package yet).
+function formatDuration(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.round((totalSeconds % 3600) / 60);
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
+}
+
+const METRICS_PERIOD_LABELS: Record<MetricsPeriod, string> = { day: "Today", week: "This week", month: "This month" };
+
+// Activity time tracking (11 September 2026) - the platform-wide
+// counterpart to FamilyDashboard.tsx's "Time in the Kingdom" section, see
+// routes/metrics.ts's GET /metrics/admin/overview. No per-class filter
+// (unlike Users/Questions tabs) - this is meant as a bird's-eye view
+// across every family; a class/subject breakdown is already what the
+// left column below shows.
+function MetricsTab() {
+  const [period, setPeriod] = useState<MetricsPeriod>("week");
+  const [data, setData] = useState<AdminMetricsOverview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getAdminMetricsOverview({ period })
+      .then(setData)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load metrics"));
+  }, [period]);
+
+  if (error) return <p className="text-sm font-medium text-destructive">{error}</p>;
+  if (data === null) return <p className="text-sm text-muted-foreground">Loading...</p>;
+
+  const maxRowSeconds = Math.max(1, ...data.byClassSubjectTopic.map((r) => r.seconds));
+  const maxGameSeconds = Math.max(1, ...data.byGame.map((r) => r.seconds));
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg">Metrics</h2>
+          <p className="text-sm text-muted-foreground">How much time every player is actually spending in the Kingdom.</p>
+        </div>
+        <div className="flex gap-2">
+          {(Object.keys(METRICS_PERIOD_LABELS) as MetricsPeriod[]).map((p) => (
+            <Button key={p} size="sm" variant={period === p ? "default" : "secondary"} onClick={() => setPeriod(p)}>
+              {METRICS_PERIOD_LABELS[p]}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { icon: Clock, label: "Total time", value: formatDuration(data.totalSeconds) },
+          { icon: Users, label: "Active players", value: `${data.activeProfiles}` },
+          { icon: Target, label: "Quiz time", value: formatDuration(data.byActivityType.quiz ?? 0) },
+          { icon: Gamepad2, label: "Arcade time", value: formatDuration(data.byActivityType.game ?? 0) },
+        ].map((s, i) => {
+          const accent = ACCENTS[i % ACCENTS.length];
+          return (
+            <div key={s.label} className="rounded-2xl border border-border bg-card p-5">
+              <span className={`grid size-10 place-items-center rounded-full ${accent.tint} ${accent.text}`}>
+                <s.icon className="size-5" />
+              </span>
+              <p className="mt-3 text-3xl font-display font-extrabold">{s.value}</p>
+              <p className="text-sm text-muted-foreground">{s.label}</p>
+            </div>
+          );
+        })}
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <h3 className="mb-2 text-sm font-semibold tracking-wide text-muted-foreground uppercase">By class · subject · topic</h3>
+          {data.byClassSubjectTopic.length === 0 && <p className="text-sm text-muted-foreground">No activity recorded yet.</p>}
+          <div className="space-y-2">
+            {data.byClassSubjectTopic.slice(0, 20).map((row, i) => (
+              <div key={i} className="rounded-xl border border-border bg-card p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium">
+                    {[row.className, row.subjectName, row.topic].filter(Boolean).join(" · ") || "Untagged"}
+                  </p>
+                  <p className="text-sm text-muted-foreground">{formatDuration(row.seconds)}</p>
+                </div>
+                <div className="mt-2 h-1.5 rounded-full bg-secondary">
+                  <div
+                    className="h-1.5 rounded-full bg-primary"
+                    style={{ width: `${Math.max(4, (row.seconds / maxRowSeconds) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-sm font-semibold tracking-wide text-muted-foreground uppercase">By Arcade game</h3>
+          {data.byGame.length === 0 && <p className="text-sm text-muted-foreground">No Arcade activity recorded yet.</p>}
+          <div className="space-y-2">
+            {data.byGame.map((row) => (
+              <div key={row.gameKey} className="rounded-xl border border-border bg-card p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium">{GAME_META[row.gameKey as GameKey]?.title ?? row.gameKey}</p>
+                  <p className="text-sm text-muted-foreground">{formatDuration(row.seconds)}</p>
+                </div>
+                <div className="mt-2 h-1.5 rounded-full bg-secondary">
+                  <div
+                    className="h-1.5 rounded-full bg-amethyst"
+                    style={{ width: `${Math.max(4, (row.seconds / maxGameSeconds) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TABS: { key: Tab; label: string; icon: typeof Bird }[] = [
   { key: "questions", label: "Questions", icon: FileUp },
   { key: "topics", label: "Topics", icon: LayoutGrid },
@@ -1608,6 +1783,7 @@ const TABS: { key: Tab; label: string; icon: typeof Bird }[] = [
   { key: "content", label: "Add content", icon: FileUp },
   { key: "studyBuddy", label: "Study Buddy", icon: Settings2 },
   { key: "features", label: "Features", icon: ToggleLeft },
+  { key: "metrics", label: "Metrics", icon: Clock },
 ];
 
 // Admin control center: question management, the user roster, and content
@@ -1636,14 +1812,21 @@ export function AdminDashboard({ admin, onLogOut }: { admin: AdminUser; onLogOut
             <p className="text-xs font-semibold tracking-[0.24em] text-muted-foreground uppercase">Puzzle Kingdom admin</p>
             <h1 className="text-2xl">{admin.username}</h1>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 rounded-full bg-secondary/60 p-1.5">
             {TABS.map((t) => (
-              <Button key={t.key} size="sm" variant={tab === t.key ? "default" : "secondary"} onClick={() => setTab(t.key)}>
+              <Button
+                key={t.key}
+                size="sm"
+                variant={tab === t.key ? "default" : "ghost"}
+                onClick={() => setTab(t.key)}
+                className="gap-1.5 rounded-full"
+              >
+                <t.icon className="size-3.5" />
                 {t.label}
               </Button>
             ))}
-            <Button size="sm" variant="secondary" onClick={handleLogOut}>
-              <LogOut className="size-4" />
+            <Button size="sm" variant="outline" onClick={handleLogOut} className="ml-1 gap-1.5 rounded-full">
+              <LogOut className="size-3.5" />
               Log out
             </Button>
           </div>
@@ -1656,6 +1839,7 @@ export function AdminDashboard({ admin, onLogOut }: { admin: AdminUser; onLogOut
           {tab === "content" && <Upload />}
           {tab === "studyBuddy" && <StudyBuddyTab />}
           {tab === "features" && <FeaturesTab />}
+          {tab === "metrics" && <MetricsTab />}
         </div>
       </div>
     </div>

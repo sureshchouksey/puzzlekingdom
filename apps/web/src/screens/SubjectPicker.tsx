@@ -20,6 +20,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { assembleQuiz, getClassSubjects, getFeatures, getQuizInProgress, getTopicReports, getTopics, resumeQuiz } from "../api";
+import { useActivityHeartbeat } from "../hooks/useActivityHeartbeat";
 import type {
   AssembleQuizResponse,
   FeatureFlags,
@@ -172,6 +173,22 @@ export function SubjectPicker({
   const [subjects, setSubjects] = useState<Subject[] | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode | null>(null);
+
+  // Activity time tracking (11 September 2026) - see
+  // useActivityHeartbeat.ts. Lowest-priority of the four wired-in
+  // screens: covers time spent picking a subject/mode. Disabled the
+  // moment quest/practice/games mode is entered - Quest/Practice hand off
+  // to the "quiz" screen (which unmounts this component and its own
+  // heartbeat takes over), but "games" renders Arcade inline right here
+  // without unmounting, so without this the same minute would double-
+  // count under both "browsing" and "game".
+  const browsingSubjectId = subjects?.find((s) => s.name === selectedSubject)?.id;
+  useActivityHeartbeat({
+    activityType: "browsing",
+    classId: pkClass.id,
+    subjectId: browsingSubjectId,
+    enabled: mode === null,
+  });
 
   const [topics, setTopics] = useState<string[] | null>(null);
   const [topicReports, setTopicReports] = useState<TopicReport[] | null>(null);

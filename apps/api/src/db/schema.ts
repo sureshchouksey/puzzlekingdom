@@ -113,6 +113,18 @@ export const families = pgTable("families", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // Per-family feature toggles (migration 0027) - each family owner
+  // enables/disables their own family's access to each feature area from
+  // FamilyDashboard.tsx's "Family features" panel. childEducationEnabled
+  // gates something real today (reports/activity-time); the other three
+  // gate only a "coming soon" placeholder for now - real integrations
+  // (SmartClassify job matching, council activity feeds, health
+  // tracking) are deferred to a later phase. See that migration's own
+  // comment for the full rationale.
+  childEducationEnabled: boolean("child_education_enabled").notNull().default(true),
+  childHealthEnabled: boolean("child_health_enabled").notNull().default(false),
+  itJobsEnabled: boolean("it_jobs_enabled").notNull().default(false),
+  councilJobsEnabled: boolean("council_jobs_enabled").notNull().default(false),
 });
 
 // A parent/guardian login for a family - one-to-many against `families`
@@ -309,6 +321,7 @@ export const profilesRelations = relations(profiles, ({ one, many }) => ({
   tutorConversations: many(tutorConversations),
   tutorGrowthInsights: many(tutorGrowthInsights),
   gameAttempts: many(gameAttempts),
+  heartbeats: many(activityHeartbeats),
 }));
 
 export const familiesRelations = relations(families, ({ many }) => ({
@@ -517,6 +530,44 @@ export const gameAttempts = pgTable("game_attempts", {
   starsEarned: integer("stars_earned").notNull().default(0),
   playedAt: timestamp("played_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Activity time tracking (11 September 2026) - one raw ping row every
+// ~30s while a screen is open and foregrounded (Page Visibility API), not
+// a rollup/summary table. Aggregated live via SQL at read time by
+// routes/metrics.ts, same "no job queue for a small-scale app" approach
+// leaderboard.ts/admin.ts's GET /admin/users already use. See migration
+// 0026's own header comment for the full rationale, including why
+// durationSeconds is fixed server-side rather than trusted from the
+// client.
+export const activityHeartbeats = pgTable("activity_heartbeats", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  profileId: uuid("profile_id").notNull().references(() => profiles.id),
+  // 'quiz' | 'game' | 'study_buddy' | 'browsing' - free text + a check
+  // constraint on the migration side (not a pg enum), same convention as
+  // tutorConversations.contextType/gameAttempts.gameKey.
+  activityType: text("activity_type").notNull(),
+  subjectId: uuid("subject_id").references(() => subjects.id),
+  classId: uuid("class_id").references(() => classes.id),
+  // Only meaningful for 'quiz' (and optionally 'study_buddy').
+  topic: text("topic"),
+  // Only meaningful for 'game' - one of GAME_DEFINITIONS' keys
+  // (games.ts), e.g. "spelling_sprint".
+  gameKey: text("game_key"),
+  quizAttemptId: uuid("quiz_attempt_id").references(() => quizAttempts.id),
+  tutorConversationId: uuid("tutor_conversation_id").references(() => tutorConversations.id),
+  // Fixed at insert time to the heartbeat interval - never trusted from
+  // the client (see routes/metrics.ts's POST /metrics/heartbeat).
+  durationSeconds: integer("duration_seconds").notNull().default(30),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const activityHeartbeatsRelations = relations(activityHeartbeats, ({ one }) => ({
+  profile: one(profiles, { fields: [activityHeartbeats.profileId], references: [profiles.id] }),
+  subject: one(subjects, { fields: [activityHeartbeats.subjectId], references: [subjects.id] }),
+  class: one(classes, { fields: [activityHeartbeats.classId], references: [classes.id] }),
+  quizAttempt: one(quizAttempts, { fields: [activityHeartbeats.quizAttemptId], references: [quizAttempts.id] }),
+  tutorConversation: one(tutorConversations, { fields: [activityHeartbeats.tutorConversationId], references: [tutorConversations.id] }),
+}));
 
 export const gameAttemptsRelations = relations(gameAttempts, ({ one }) => ({
   profile: one(profiles, { fields: [gameAttempts.profileId], references: [profiles.id] }),

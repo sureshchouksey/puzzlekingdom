@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, PartyPopper, Sparkles } from "lucide-react";
 import { submitStage } from "../api";
+import { useActivityHeartbeat } from "../hooks/useActivityHeartbeat";
 import { AnswerReviewCard } from "../components/AnswerReviewCard";
 import type { AssembleQuizResponse, QuizQuestion, SelectedPayload, SubmitStageResponse, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
@@ -92,6 +93,18 @@ export function Quiz({
   const isAnswered = question ? isQuestionAnswered(question, answers[question.id]) : false;
   const isLastQuestion = currentQuestionIndex === currentStage.length - 1;
   const allAnswered = currentStage.every((q) => isQuestionAnswered(q, answers[q.id]));
+
+  // Activity time tracking (11 September 2026) - see useActivityHeartbeat.ts.
+  // Tagged with the current question's own topic tag, when it has one, so
+  // time-on-task can be broken down per topic on the family/admin metrics
+  // dashboards.
+  useActivityHeartbeat({
+    activityType: "quiz",
+    subjectId: quiz.subjectId,
+    classId: quiz.classId ?? undefined,
+    quizAttemptId: quiz.attemptId,
+    topic: question?.topics?.[0],
+  });
 
   // match_column's "tap a left item, then tap a right item to pair them"
   // flow needs to know which left item is currently armed - reset

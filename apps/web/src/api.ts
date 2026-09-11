@@ -1,5 +1,7 @@
 import type {
+  ActivityType,
   AdminLoginResponse,
+  AdminMetricsOverview,
   AdminQuestion,
   AdminQuestionsResponse,
   AdminQuestionWriteInput,
@@ -9,13 +11,16 @@ import type {
   AiProvider,
   AssembleQuizResponse,
   AttemptReport,
+  FamilyFeatureFlags,
   FamilyLoginResponse,
+  FamilyMetricsSummary,
   FamilySignupResponse,
   EstimateResponse,
   GameKey,
   GameRoundResponse,
   GenerateResponse,
   LeaderboardEntry,
+  MetricsPeriod,
   PkClass,
   Profile,
   ProfileLookupResponse,
@@ -301,6 +306,48 @@ export function recordGameAttempt(params: {
   }).then((res) => asJson(res));
 }
 
+// Activity time tracking (11 September 2026) - see routes/metrics.ts.
+// Fired every ~30s by useActivityHeartbeat.ts while a screen is open and
+// the tab is foregrounded. profileId is never sent - the server always
+// derives it from the caller's own token (see that route's own comment).
+// Deliberately swallows any failure: this only powers a dashboard, never
+// gameplay, so a hiccup here must never surface to the child.
+export function recordActivityHeartbeat(params: {
+  activityType: ActivityType;
+  subjectId?: string;
+  classId?: string;
+  topic?: string;
+  gameKey?: string;
+  quizAttemptId?: string;
+  tutorConversationId?: string;
+}): Promise<void> {
+  return apiFetch(`/metrics/heartbeat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error("Failed to record activity heartbeat");
+    })
+    .catch(() => {
+      // Silently ignored by design - see useActivityHeartbeat.ts.
+    });
+}
+
+// A family owner's own "Time in the Kingdom" dashboard (FamilyDashboard.tsx)
+// - every child in the caller's own family, never another's (scoped
+// server-side from the caller's token, same rule getFamilyProfiles
+// already follows).
+export function getFamilyMetricsSummary(params: { period?: MetricsPeriod } = {}): Promise<FamilyMetricsSummary> {
+  return apiFetch(`/metrics/family/summary${buildQuery(params)}`).then((res) => asJson(res));
+}
+
+// The platform-admin Metrics tab (AdminDashboard.tsx) - every family, no
+// scoping.
+export function getAdminMetricsOverview(params: { period?: MetricsPeriod } = {}): Promise<AdminMetricsOverview> {
+  return apiFetch(`/metrics/admin/overview${buildQuery(params)}`).then((res) => asJson(res));
+}
+
 export function saveManualQuestions(params: SaveManualQuestionsParams): Promise<SaveManualQuestionsResponse> {
   return apiFetch(`/documents/manual`, {
     method: "POST",
@@ -431,6 +478,23 @@ export function addFamilyProfile(params: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
+  }).then((res) => asJson(res));
+}
+
+// The caller's own family's 4 feature toggles (migration 0027) - read
+// by FamilyDashboard.tsx's "Family features" panel on mount.
+// updateFamilyFeatures merges onto the existing row (only the fields
+// sent are changed), same "send whichever fields changed" convention as
+// updateAppSettings above.
+export function getFamilyFeatures(): Promise<FamilyFeatureFlags> {
+  return apiFetch(`/families/me/features`).then((res) => asJson(res));
+}
+
+export function updateFamilyFeatures(patch: Partial<FamilyFeatureFlags>): Promise<FamilyFeatureFlags> {
+  return apiFetch(`/families/me/features`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
   }).then((res) => asJson(res));
 }
 

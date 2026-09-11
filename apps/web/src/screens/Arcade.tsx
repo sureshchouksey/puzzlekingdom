@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Blocks, CheckCircle2, Ear, Flame, Link2, PenLine, SpellCheck, Star, X } from "lucide-react";
 import { getAvailableGames, getGameRound, recordGameAttempt } from "../api";
+import { useActivityHeartbeat } from "../hooks/useActivityHeartbeat";
 import type { GameKey, GameQuestion, PkClass, Profile } from "../types";
 import { Button } from "../components/ui/button";
 
@@ -11,7 +12,11 @@ import { Button } from "../components/ui/button";
 // Reached from SubjectPicker as a third mode alongside Quest Journey and
 // Topic Practice, so it's always scoped to an already-picked class+
 // subject.
-const GAME_META: Record<GameKey, { title: string; blurb: string; icon: typeof PenLine; accent: string }> = {
+//
+// Exported (11 September 2026) so FamilyDashboard.tsx/AdminDashboard.tsx
+// can show a real game title instead of the raw gameKey on the new
+// activity-time metrics sections - same lookup, not a duplicated copy.
+export const GAME_META: Record<GameKey, { title: string; blurb: string; icon: typeof PenLine; accent: string }> = {
   spelling_sprint: {
     title: "Spelling Sprint",
     blurb: "Type the missing letters before you lose your streak.",
@@ -284,6 +289,18 @@ function ArcadeRound({
   const [finished, setFinished] = useState(false);
   const [starsEarned, setStarsEarned] = useState<number | null>(null);
   const [savingResult, setSavingResult] = useState(false);
+
+  // Activity time tracking (11 September 2026) - see
+  // useActivityHeartbeat.ts. Stops the moment the round finishes rather
+  // than running until this component unmounts, so the results screen
+  // doesn't keep quietly logging "game" time.
+  useActivityHeartbeat({
+    activityType: "game",
+    classId: pkClass.id,
+    subjectId,
+    gameKey: game,
+    enabled: !finished,
+  });
 
   useEffect(() => {
     getGameRound({ game, classId: pkClass.id, subjectName, count: ROUND_SIZE })

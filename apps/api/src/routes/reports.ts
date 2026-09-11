@@ -1,10 +1,50 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { eq, and, desc, isNotNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { subjects, classes, quizAttempts } from "../db/schema.js";
-import { requireIdentity } from "../auth.js";
+import { subjects, classes, quizAttempts, profiles } from "../db/schema.js";
+import { requireIdentity, type Identity } from "../auth.js";
 
 const DEFAULT_HISTORY_LIMIT = 20;
+
+// Resolves the profileId these routes should actually filter by, given
+// the caller's identity and whatever ?profileId= they sent.
+//
+// A plain profile session can never see anyone else's history, regardless
+// of what's in the query string - only admin's own ?profileId= override
+// is honored as-is (an admin can inspect any profile, or omit it to see
+// the combined history across everyone).
+//
+// A family_owner's ?profileId= is NOT honored as-is (fixed 11 September
+// 2026, alongside the new activity-metrics feature that's the first real
+// caller of this path from the family side): it used to be treated the
+// same as admin, which meant a family owner could pass another family's
+// profileId and see that child's reports. Now it's checked against
+// profiles.familyId first - a family owner can only ever see their own
+// children, and gets a 403 (not silently empty results) if they ask for
+// someone else's.
+async function resolveScopedProfileId(
+  identity: Identity,
+  requested: string | undefined,
+  reply: FastifyReply
+): Promise<{ profileId: string | undefined } | null> {
+  if (identity.kind === "profile") {
+    return { profileId: identity.profileId };
+  }
+  if (identity.kind === "admin") {
+    return { profileId: requested };
+  }
+  // family_owner
+  if (!requested) {
+    reply.status(400).send({ error: "profileId is required" });
+    return null;
+  }
+  const [child] = await db.select({ familyId: profiles.familyId }).from(profiles).where(eq(profiles.id, requested)).limit(1);
+  if (!child || child.familyId !== identity.familyId) {
+    reply.status(403).send({ error: "You can only view your own family's reports." });
+    return null;
+  }
+  return { profileId: requested };
+}
 
 // Progress reports, built on top of the topic-progress snapshot each quiz
 // attempt saves at submit time (see buildTopicBreakdown in routes/quizzes.ts).
@@ -31,11 +71,10 @@ export async function reportRoutes(app: FastifyInstance) {
         subjectId = subject.id;
       }
 
-      // A profile session can never see anyone else's history, regardless
-      // of what's in the query string - only an admin session's own
-      // ?profileId= override is honored.
       const identity = request.identity!;
-      const profileId = identity.kind === "profile" ? identity.profileId : request.query.profileId;
+      const scoped = await resolveScopedProfileId(identity, request.query.profileId, reply);
+      if (!scoped) return;
+      const { profileId } = scoped;
 
       const conditions = [isNotNull(quizAttempts.completedAt)];
       if (subjectId) conditions.push(eq(quizAttempts.subjectId, subjectId));
@@ -83,7 +122,9 @@ export async function reportRoutes(app: FastifyInstance) {
       }
 
       const identity = request.identity!;
-      const profileId = identity.kind === "profile" ? identity.profileId : request.query.profileId;
+      const scoped = await resolveScopedProfileId(identity, request.query.profileId, reply);
+      if (!scoped) return;
+      const { profileId } = scoped;
 
       const conditions = [sql`${quizAttempts.topicBreakdown} is not null`];
       if (subjectId) conditions.push(sql`${quizAttempts.subjectId} = ${subjectId}`);

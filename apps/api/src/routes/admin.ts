@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import bcrypt from "bcryptjs";
 import { eq, and, desc, ilike, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { admins, questions, documents, subjects, classes, topics, profiles, quizAttempts, quizAttemptAnswers, tutorConversations, tutorGrowthInsights, gameAttempts } from "../db/schema.js";
+import { admins, questions, documents, subjects, classes, topics, profiles, quizAttempts, quizAttemptAnswers, tutorConversations, tutorGrowthInsights, gameAttempts, activityHeartbeats } from "../db/schema.js";
 import { generatedOptionSchema } from "../lib/question-schema.js";
 import { QUESTION_TYPES, type QuestionType, type QuestionOption, validateQuestionShape } from "../lib/question-shape.js";
 import { getAppSettings } from "../services/tutorBudget.js";
@@ -164,6 +164,19 @@ export async function adminRoutes(app: FastifyInstance) {
       if (topic) conditions.push(sql`${questions.topics} @> ARRAY[${topic}]::text[]`);
       if (search) conditions.push(ilike(questions.questionText, `%${search}%`));
 
+      // Total matching this filter (class/subject/topic/search), not just
+      // this page - lets the admin dashboard show "N questions" right
+      // after seeding, without paging through every 30-row page to count
+      // by hand. Same join/where as the page query above, so it always
+      // reflects exactly what the current filter would return.
+      const [{ count: totalCount }] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(questions)
+        .innerJoin(subjects, eq(questions.subjectId, subjects.id))
+        .innerJoin(documents, eq(questions.documentId, documents.id))
+        .leftJoin(classes, eq(documents.classId, classes.id))
+        .where(conditions.length ? and(...conditions) : undefined);
+
       const rows = await db
         .select({
           id: questions.id,
@@ -192,7 +205,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
-      return { questions: page, nextCursor: hasMore ? String(offset + limit) : null };
+      return { questions: page, nextCursor: hasMore ? String(offset + limit) : null, totalCount };
     }
   );
 
@@ -483,6 +496,14 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!existing) return reply.status(404).send({ error: "Profile not found" });
 
     await db.transaction(async (tx) => {
+      // activity_heartbeats (migration 0026) must go first - it can
+      // reference either quiz_attempts or tutor_conversations
+      // (quiz_attempt_id / tutor_conversation_id, both with no ON DELETE
+      // behavior), so deleting those below before this would 500 on an
+      // FK violation for any profile with heartbeat activity. Matched by
+      // profile_id directly, so this one delete covers every heartbeat
+      // row regardless of which FK it also carries.
+      await tx.delete(activityHeartbeats).where(eq(activityHeartbeats.profileId, profileId));
       // quiz_attempt_answers has no direct profile_id column - it hangs
       // off quiz_attempts, so delete via a subquery before the attempts
       // themselves.

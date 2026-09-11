@@ -234,11 +234,6 @@ export default function App() {
             setFamilyOwner(null);
             setScreen({ name: "welcome" });
           }}
-          onEnter={(enteredProfile) => {
-            setProfile(enteredProfile);
-            setFamilyOwner(null);
-            setScreen({ name: "home" });
-          }}
         />
       );
     // A separate class picker instance from "classPicker" above - same

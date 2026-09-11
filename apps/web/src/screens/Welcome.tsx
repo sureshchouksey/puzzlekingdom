@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ShieldHalf } from "lucide-react";
 import { lookupProfile, setProfilePin, verifyProfilePin } from "../api";
+import { useSlowSubmit } from "../hooks/useSlowSubmit";
 import type { Profile, ProfileLookupResponse } from "../types";
 import { Button } from "../components/ui/button";
 import { AvatarPicker } from "../components/AvatarPicker";
@@ -57,11 +58,17 @@ export function Welcome({
   const [pinField, setPinField] = useState<"pin" | "confirm">("pin");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // See useSlowSubmit's own comment - this is specifically for the
+  // Render free-tier cold-start production complaint (11 September
+  // 2026): the button used to just show "..." with no explanation for up
+  // to a minute on the first request of a visit, which read as frozen.
+  const { slow, start: startSlowTimer, stop: stopSlowTimer } = useSlowSubmit();
 
   async function handleNameSubmit() {
     if (!name.trim()) return;
     setSubmitting(true);
     setError(null);
+    startSlowTimer();
     try {
       const looked = await lookupProfile(capitalize(name));
       if (looked.created) {
@@ -75,6 +82,7 @@ export function Welcome({
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setSubmitting(false);
+      stopSlowTimer();
     }
   }
 
@@ -89,12 +97,15 @@ export function Welcome({
     }
     setSubmitting(true);
     setError(null);
+    startSlowTimer();
     try {
       const { profile } = await setProfilePin(looked.id, { pin, title, avatarId });
       onEnter(profile);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to set PIN");
       setSubmitting(false);
+    } finally {
+      stopSlowTimer();
     }
   }
 
@@ -105,6 +116,7 @@ export function Welcome({
     }
     setSubmitting(true);
     setError(null);
+    startSlowTimer();
     try {
       const { profile } = await verifyProfilePin(looked.id, pin);
       onEnter(profile);
@@ -112,6 +124,8 @@ export function Welcome({
       setError(err instanceof Error ? err.message : "Incorrect PIN");
       setPin("");
       setSubmitting(false);
+    } finally {
+      stopSlowTimer();
     }
   }
 
@@ -276,6 +290,12 @@ export function Welcome({
             >
               &larr; Not you? Start over
             </button>
+          )}
+
+          {submitting && slow && (
+            <p className="mt-4 text-sm text-muted-foreground">
+              Waking up the kingdom&hellip; first visit today can take up to a minute. Hang tight!
+            </p>
           )}
 
           {error && <p className="mt-4 text-sm font-medium text-destructive">{error}</p>}

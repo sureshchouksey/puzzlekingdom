@@ -54,6 +54,27 @@ const addProfileSchema = z.object({
   avatarId: z.string().trim().min(1).optional(),
 });
 
+// Body shape for PATCH /families/me/features - every field optional,
+// same "only send what changed" convention as admin.ts's
+// settingsWriteSchema. See migration 0027's own comment for what each
+// flag gates (today: only childEducationEnabled gates something real -
+// the other three just reveal a "coming soon" placeholder).
+const featuresPatchSchema = z.object({
+  childEducationEnabled: z.boolean().optional(),
+  childHealthEnabled: z.boolean().optional(),
+  itJobsEnabled: z.boolean().optional(),
+  councilJobsEnabled: z.boolean().optional(),
+});
+
+function publicFeatures(f: typeof families.$inferSelect) {
+  return {
+    childEducationEnabled: f.childEducationEnabled,
+    childHealthEnabled: f.childHealthEnabled,
+    itJobsEnabled: f.itJobsEnabled,
+    councilJobsEnabled: f.councilJobsEnabled,
+  };
+}
+
 // The Track 7 multi-family platform: any family can sign up, log in as one
 // or more parent/guardian owners (by email + a 4-digit PIN, same keypad
 // UI and credential weight as a child's own login - migration 0025), and
@@ -212,4 +233,38 @@ export async function familyRoutes(app: FastifyInstance) {
       return reply.status(201).send({ ...publicProfile(profile), hasPin: false });
     }
   );
+
+  // The caller's own family's 4 feature toggles (migration 0027) - the
+  // "Family features" panel on FamilyDashboard.tsx reads this on mount.
+  // Scoped to identity.familyId from the JWT, same rule every other
+  // /families/me/* route in this file follows.
+  app.get("/families/me/features", { preHandler: requireFamilyOwner }, async (request, reply) => {
+    const identity = request.identity as { kind: "family_owner"; familyId: string };
+    const [family] = await db.select().from(families).where(eq(families.id, identity.familyId)).limit(1);
+    if (!family) {
+      return reply.status(404).send({ error: "Family not found" });
+    }
+    return reply.send(publicFeatures(family));
+  });
+
+  // Flips one or more of the caller's own family's 4 feature toggles.
+  // Merges onto the current row (only the fields sent are changed), same
+  // pattern as admin.ts's PATCH /admin/settings.
+  app.patch<{ Body: unknown }>("/families/me/features", { preHandler: requireFamilyOwner }, async (request, reply) => {
+    const parsed = featuresPatchSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.issues[0]?.message ?? "Invalid request body" });
+    }
+    const body = parsed.data;
+    if (Object.keys(body).length === 0) {
+      return reply.status(400).send({ error: "At least one feature must be provided" });
+    }
+    const identity = request.identity as { kind: "family_owner"; familyId: string };
+
+    const [updated] = await db.update(families).set(body).where(eq(families.id, identity.familyId)).returning();
+    if (!updated) {
+      return reply.status(404).send({ error: "Family not found" });
+    }
+    return reply.send(publicFeatures(updated));
+  });
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, BookOpenText, Bird, Dices, GraduationCap, Laugh, Lightbulb, Puzzle as PuzzleIcon, Send } from "lucide-react";
 import { getClassSubjects, getFeatures, getTutorConversation, sendTutorMessage, startTutorConversation } from "../api";
+import { useActivityHeartbeat } from "../hooks/useActivityHeartbeat";
 import type { PkClass, Subject, TutorConversation, TutorMessage, TutorMessageMode, TutorQuestionContext } from "../types";
 import { Button } from "../components/ui/button";
 
@@ -88,6 +89,18 @@ export function StudyBuddy({
   }, []);
 
   const classId = questionContext ? questionContext.classId : pkClass?.id;
+
+  // Activity time tracking (11 September 2026) - see
+  // useActivityHeartbeat.ts. Only enabled once a conversation actually
+  // exists (the greeting has landed), so opening the subject picker step
+  // never counts as "study_buddy" time on its own.
+  useActivityHeartbeat({
+    activityType: "study_buddy",
+    classId,
+    subjectId: subject?.id,
+    tutorConversationId: conversation?.id,
+    enabled: !!conversation,
+  });
 
   useEffect(() => {
     if (questionContext || !pkClass) return;

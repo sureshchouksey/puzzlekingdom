@@ -444,6 +444,11 @@ export type AdminQuestion = {
 export type AdminQuestionsResponse = {
   questions: AdminQuestion[];
   nextCursor: string | null;
+  // Total questions matching the current class/subject/topic/search
+  // filter (not just this page) - lets the admin dashboard show a live
+  // count right after seeding, per
+  // plan/Question-Types-and-Content-Authoring-Plan.md.
+  totalCount: number;
 };
 
 // Body for creating or editing a question from the admin dashboard - every
@@ -645,4 +650,74 @@ export type FeatureFlags = {
   funContentEnabled: boolean;
   arcadeEnabled: boolean;
   games: Record<GameKey, boolean>;
+};
+
+// Activity time tracking (11 September 2026) - see apps/api/src/routes/
+// metrics.ts for the full rationale and apps/api/drizzle/
+// 0026_add_activity_tracking.sql for the underlying table. Mirrors that
+// route's response shapes exactly, following the existing TopicReport/
+// AdminUserSummary flat-object naming convention.
+export type ActivityType = "quiz" | "game" | "study_buddy" | "browsing";
+
+export type MetricsPeriod = "day" | "week" | "month";
+
+// One child's activity summary within GET /metrics/family/summary -
+// totalSeconds/activeDays are 0 (not missing) for a child with no
+// activity yet, same "still show up" convention as AdminUserSummary.
+export type ChildActivitySummary = {
+  profileId: string;
+  name: string;
+  title: string | null;
+  avatarId: string | null;
+  totalSeconds: number;
+  activeDays: number;
+  byActivityType: Partial<Record<ActivityType, number>>;
+  topTopic: string | null;
+  topGame: string | null;
+  dailyTrend: { date: string; seconds: number }[];
+};
+
+export type FamilyMetricsSummary = {
+  period: MetricsPeriod;
+  children: ChildActivitySummary[];
+};
+
+// The caller's own family's 4 feature toggles (migration 0027) -
+// GET/PATCH /families/me/features. childEducationEnabled gates something
+// real today (the reports/activity-time views above); the other three
+// just gate a "coming soon" placeholder in FamilyDashboard.tsx for now -
+// real integrations are deferred to a later phase.
+export type FamilyFeatureFlags = {
+  childEducationEnabled: boolean;
+  childHealthEnabled: boolean;
+  itJobsEnabled: boolean;
+  councilJobsEnabled: boolean;
+};
+
+// One row of GET /metrics/admin/overview's class/subject/topic
+// breakdown - left-joined, so classId/className/subjectId/subjectName/
+// topic can each be null (activity logged with no class/subject/topic
+// tagged still appears, same convention as GET /admin/users).
+export type AdminMetricsClassSubjectTopicRow = {
+  classId: string | null;
+  className: string | null;
+  subjectId: string | null;
+  subjectName: string | null;
+  topic: string | null;
+  seconds: number;
+};
+
+export type AdminMetricsGameRow = {
+  gameKey: string;
+  seconds: number;
+};
+
+export type AdminMetricsOverview = {
+  period: MetricsPeriod;
+  totalSeconds: number;
+  activeProfiles: number;
+  byActivityType: Partial<Record<ActivityType, number>>;
+  dailyTrend: { date: string; seconds: number }[];
+  byClassSubjectTopic: AdminMetricsClassSubjectTopicRow[];
+  byGame: AdminMetricsGameRow[];
 };
