@@ -13,6 +13,7 @@ import type {
   AttemptReport,
   FamilyFeatureFlags,
   FamilyLoginResponse,
+  Flashcard,
   FamilyMetricsSummary,
   FamilySignupResponse,
   EstimateResponse,
@@ -77,7 +78,7 @@ export function getAuthToken(): string | null {
   }
 }
 
-function setAuthToken(token: string): void {
+export function setAuthToken(token: string): void {
   try {
     localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
   } catch {
@@ -496,6 +497,31 @@ export function updateFamilyFeatures(patch: Partial<FamilyFeatureFlags>): Promis
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   }).then((res) => asJson(res));
+}
+
+// Certification Prep (18 September 2026): find-or-create the family
+// owner's own study profile, then mint a profile-session token for it -
+// no PIN needed, the caller is already authenticated as the family owner.
+// Call ensureStudyProfile() once, then mintStudyProfileSession() to get a
+// token, then setAuthToken(token) + track the previous token so the
+// caller can restore it when the owner exits Certification Prep - see
+// App.tsx's handleOpenCertPrep/exitStudyMode.
+export function ensureStudyProfile(): Promise<Profile> {
+  return apiFetch(`/families/me/study-profile`, { method: "POST" }).then((res) => asJson(res));
+}
+
+export function mintStudyProfileSession(): Promise<{ profile: Profile; token: string }> {
+  return apiFetch(`/families/me/study-profile/session`, { method: "POST" }).then((res) => asJson(res));
+}
+
+// Flashcards are subject-scoped (see flashcards.ts) and read-only from
+// the client - seeded via apps/api/scripts/seed-flashcards.ts.
+export function getFlashcards(subjectName: string, topic?: string): Promise<Flashcard[]> {
+  const params = new URLSearchParams({ subjectName });
+  if (topic) params.set("topic", topic);
+  return apiFetch(`/flashcards?${params.toString()}`)
+    .then((res) => asJson<{ cards: Flashcard[] }>(res))
+    .then((r) => r.cards);
 }
 
 export function getAdminQuestions(

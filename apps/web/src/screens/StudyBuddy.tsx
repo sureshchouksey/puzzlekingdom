@@ -24,6 +24,15 @@ import { Button } from "../components/ui/button";
 // enforces this via which Screen variant led here); this component
 // doesn't otherwise care which one it is once `subject`/`classId` are
 // resolved.
+//
+// initialSubjectName (19 September 2026, Certification Prep's own "Ask
+// your Study Buddy" tile) - a third, lighter way in: the caller already
+// knows which subject by name (CertPrepHub already fetched its
+// certifications), but not a full TutorQuestionContext. Matched against
+// `subjects` once they load, same effect as tapping that subject on the
+// picker screen below, so a certification's Study Buddy tile never has
+// to make the family owner pick the one certification they just came
+// from all over again.
 type ChatBubble = {
   role: "student" | "agent";
   content: string;
@@ -48,10 +57,12 @@ function BackHeader({ title, subtitle, onBack }: { title: string; subtitle?: str
 export function StudyBuddy({
   pkClass,
   questionContext,
+  initialSubjectName,
   onBack,
 }: {
   pkClass?: PkClass;
   questionContext?: TutorQuestionContext;
+  initialSubjectName?: string;
   onBack: () => void;
 }) {
   const [subjects, setSubjects] = useState<Subject[] | null>(null);
@@ -88,6 +99,18 @@ export function StudyBuddy({
       .catch(() => {});
   }, []);
 
+  // Certification Prep (19 September 2026, direct user request - "disable
+  // the riddle, play game, jokes, Tongue twister for certification prep
+  // people, it is good for children"): initialSubjectName is only ever
+  // set by CertPrepHub's own "Ask your Study Buddy" tile, so it doubles
+  // as the signal that this chat is a grown-up studying for a work
+  // certification rather than a child on their own profile. "Quiz me!"
+  // (real curriculum practice questions) stays available either way -
+  // only the riddle/joke/tongue-twister/play-a-game fun content is
+  // child-only.
+  const isCertPrep = Boolean(initialSubjectName);
+  const funContentAvailable = funContentEnabled && !isCertPrep;
+
   const classId = questionContext ? questionContext.classId : pkClass?.id;
 
   // Activity time tracking (11 September 2026) - see
@@ -108,6 +131,12 @@ export function StudyBuddy({
       .then(setSubjects)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load subjects"));
   }, [pkClass, questionContext]);
+
+  useEffect(() => {
+    if (!initialSubjectName || subject) return;
+    const match = subjects?.find((s) => s.name === initialSubjectName);
+    if (match) setSubject(match);
+  }, [initialSubjectName, subjects, subject]);
 
   useEffect(() => {
     if (!subject || !classId) return;
@@ -162,6 +191,24 @@ export function StudyBuddy({
   }
 
   if (!subject) {
+    // initialSubjectName: the certification was already chosen upstream
+    // on CertPrepHub, so the effect above matches and selects it the
+    // moment `subjects` loads - this just covers that brief gap with a
+    // "preparing" message instead of flashing the full subject list.
+    if (initialSubjectName) {
+      return (
+        <main className="night-sky relative min-h-screen overflow-hidden">
+          <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+          <div className="relative mx-auto flex min-h-screen w-full max-w-2xl flex-col px-6 py-8">
+            <BackHeader title="Ask your Study Buddy" onBack={onBack} />
+            <section className="mx-auto mt-10 flex w-full max-w-sm flex-1 flex-col gap-3">
+              {error && <p className="text-center text-sm font-medium text-destructive">{error}</p>}
+              <p className="text-center text-muted-foreground">Opening your chat about {initialSubjectName}...</p>
+            </section>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="night-sky relative min-h-screen overflow-hidden">
         <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
@@ -264,15 +311,15 @@ export function StudyBuddy({
               // bank server-side (tutorIntent.ts's keyword fallback picks
               // a random riddle/joke/tongue-twister/puzzle for the bare
               // "Can we play a game?" phrase) - so all 5 are gated
-              // together by funContentEnabled below, distinct from "Quiz
+              // together by funContentAvailable below, distinct from "Quiz
               // me!" itself, which is real curriculum content
               // (tutorQuizGame.ts) and always stays on.
-              ...(funContentEnabled ? [{ label: "Play a game", icon: Dices, text: "Can we play a game?" }] : []),
+              ...(funContentAvailable ? [{ label: "Play a game", icon: Dices, text: "Can we play a game?" }] : []),
               // Real curriculum questions from this chat's own class/
               // subject (tutorQuizGame.ts) - distinct from the riddle/
               // joke/trivia chips below, which stay general fun content.
               { label: "Quiz me!", icon: GraduationCap, text: "Give me a real practice question from my lessons!" },
-              ...(funContentEnabled
+              ...(funContentAvailable
                 ? [
                     { label: "Riddle", icon: PuzzleIcon, text: "Give me a riddle!" },
                     { label: "Joke", icon: Laugh, text: "Tell me a joke!" },

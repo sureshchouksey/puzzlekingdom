@@ -24,6 +24,7 @@ export const QUESTION_TYPES = [
   "match_column",
   "short_answer",
   "long_answer",
+  "categorize",
 ] as const;
 
 export type QuestionType = (typeof QUESTION_TYPES)[number];
@@ -99,6 +100,31 @@ export function validateQuestionShape(
         return { ok: false, error: "At least one rubric key point (used as the model answer) is required" };
       }
       return { ok: true, options: [], correctOptionId: "", answerPayload: { rubricKeyPoints: rubric } };
+    }
+    case "categorize": {
+      // Sort several items into a small, SHARED set of named buckets -
+      // unlike match_column, buckets.length is normally much smaller than
+      // items.length and the same bucket can be the right answer for
+      // several items (see migration 0029 for why this couldn't just be
+      // a match_column question).
+      const items = answerPayload?.items;
+      const buckets = answerPayload?.buckets;
+      const correctBucketIndex = answerPayload?.correctBucketIndex;
+      const validList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string" && x.trim().length > 0);
+      if (!validList(items) || items.length < 2) {
+        return { ok: false, error: "Categorize needs at least 2 items to sort" };
+      }
+      if (!validList(buckets) || buckets.length < 2) {
+        return { ok: false, error: "Categorize needs at least 2 buckets" };
+      }
+      if (
+        !Array.isArray(correctBucketIndex) ||
+        correctBucketIndex.length !== items.length ||
+        !correctBucketIndex.every((b) => typeof b === "number" && Number.isInteger(b) && b >= 0 && b < buckets.length)
+      ) {
+        return { ok: false, error: "correctBucketIndex must have one valid bucket index per item" };
+      }
+      return { ok: true, options: [], correctOptionId: "", answerPayload: { items, buckets, correctBucketIndex } };
     }
   }
 }

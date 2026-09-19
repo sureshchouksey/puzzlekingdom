@@ -127,6 +127,27 @@ export function AnswerReviewCard({
             </div>
           )}
 
+          {a.questionType === "categorize" && a.answerPayload?.items && (
+            <div className="mt-2 space-y-1 text-sm">
+              {a.answerPayload.items.map((itemText, ii) => {
+                const pairs = submittedPairs(a.selectedPayload);
+                const correctBucketIndex = a.answerPayload?.correctBucketIndex ?? [];
+                const chosenBucket = pairs.find(([i]) => i === ii)?.[1];
+                const correctBucket = correctBucketIndex[ii];
+                const chosenBucketText = chosenBucket !== undefined ? a.answerPayload?.buckets?.[chosenBucket] : undefined;
+                const correctBucketText = correctBucket !== undefined ? a.answerPayload?.buckets?.[correctBucket] : undefined;
+                const matched = chosenBucket !== undefined && chosenBucket === correctBucket;
+                return (
+                  <p key={ii} className={matched ? "font-medium text-emerald" : "text-destructive"}>
+                    {itemText} → {chosenBucketText ?? "(not sorted)"}
+                    {!matched && correctBucketText ? ` · correct: ${correctBucketText}` : ""}
+                  </p>
+                );
+              })}
+              {a.score !== null && <p className="mt-1 text-xs text-muted-foreground">{Math.round(a.score * 100)}% sorted correctly</p>}
+            </div>
+          )}
+
           {(a.questionType === "short_answer" || a.questionType === "long_answer") && (
             <div className="mt-2 text-sm">
               <p className="whitespace-pre-wrap">Your answer: {submittedText(a.selectedPayload) || "(no answer)"}</p>

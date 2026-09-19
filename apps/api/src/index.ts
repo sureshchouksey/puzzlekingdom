@@ -15,6 +15,7 @@ import { familyRoutes } from "./routes/families.js";
 import { tutorRoutes } from "./routes/tutor.js";
 import { gameRoutes } from "./routes/games.js";
 import { metricsRoutes } from "./routes/metrics.js";
+import { flashcardRoutes } from "./routes/flashcards.js";
 import { closeDb } from "./db/client.js";
 
 // forceCloseConnections: without this, app.close() waits for any open
@@ -65,6 +66,7 @@ await app.register(familyRoutes);
 await app.register(tutorRoutes);
 await app.register(gameRoutes);
 await app.register(metricsRoutes);
+await app.register(flashcardRoutes);
 
 app.listen({ port: env.PORT, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);

@@ -15,7 +15,8 @@ export type GradableQuestion = {
     | "missing_spelling"
     | "match_column"
     | "short_answer"
-    | "long_answer";
+    | "long_answer"
+    | "categorize";
   correctOptionId: string;
   answerPayload: Record<string, unknown> | null;
 };
@@ -95,6 +96,31 @@ function gradeMatchColumn(question: GradableQuestion, submitted: SubmittedAnswer
   return { isCorrect: score === 1, score };
 }
 
+function asBucketIndexList(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((v): v is number => typeof v === "number") : [];
+}
+
+// Same "pairs" wire shape as match_column ([itemIndex, bucketIndex] per
+// assignment) and the same partial-credit-by-fraction-correct pattern as
+// gradeMatchColumn above - see Quiz.tsx's categorize board, which reuses
+// match_column's existing tap-to-arm/tap-to-place handlers verbatim since
+// the on-the-wire shape lines up exactly.
+function gradeCategorize(question: GradableQuestion, submitted: SubmittedAnswer): GradeResult {
+  const correctBucketIndex = asBucketIndexList(question.answerPayload?.correctBucketIndex);
+  if (correctBucketIndex.length === 0) return { isCorrect: false, score: 0 };
+
+  const payload =
+    submitted.selectedPayload && typeof submitted.selectedPayload === "object"
+      ? (submitted.selectedPayload as { pairs?: unknown }).pairs
+      : undefined;
+  const submittedAssignments = asPairList(payload);
+  const chosenByItem = new Map(submittedAssignments.map(([item, bucket]) => [item, bucket]));
+
+  const matched = correctBucketIndex.filter((bucket, itemIndex) => chosenByItem.get(itemIndex) === bucket).length;
+  const score = Math.min(matched / correctBucketIndex.length, 1);
+  return { isCorrect: score === 1, score };
+}
+
 // Grades one submitted answer against its question. See
 // "Scoring-engine impact" in Question-Types-and-Content-Authoring-Plan.md
 // for the type-by-type breakdown this mirrors.
@@ -112,6 +138,8 @@ export function gradeAnswer(question: GradableQuestion, submitted: SubmittedAnsw
       return gradeAcceptedAnswer(question, submitted, true);
     case "match_column":
       return gradeMatchColumn(question, submitted);
+    case "categorize":
+      return gradeCategorize(question, submitted);
     case "short_answer":
     case "long_answer":
       // Excluded from auto-scoring in Phase 1 (automated spelling

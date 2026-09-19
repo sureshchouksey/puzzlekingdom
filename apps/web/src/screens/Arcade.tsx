@@ -1,5 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Blocks, CheckCircle2, Ear, Flame, Link2, PenLine, SpellCheck, Star, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Blocks,
+  Boxes,
+  Brain,
+  Building2,
+  CheckCircle2,
+  Ear,
+  Flame,
+  Lightbulb,
+  Link2,
+  ListChecks,
+  Map as MapIcon,
+  PenLine,
+  Shapes,
+  Shuffle,
+  ShieldCheck,
+  SpellCheck,
+  Star,
+  Wand2,
+  Workflow,
+  X,
+} from "lucide-react";
 import { getAvailableGames, getGameRound, recordGameAttempt } from "../api";
 import { useActivityHeartbeat } from "../hooks/useActivityHeartbeat";
 import type { GameKey, GameQuestion, PkClass, Profile } from "../types";
@@ -16,36 +38,328 @@ import { Button } from "../components/ui/button";
 // Exported (11 September 2026) so FamilyDashboard.tsx/AdminDashboard.tsx
 // can show a real game title instead of the raw gameKey on the new
 // activity-time metrics sections - same lookup, not a duplicated copy.
-export const GAME_META: Record<GameKey, { title: string; blurb: string; icon: typeof PenLine; accent: string }> = {
+// Per-game "how to think about this" content, shown on a one-time tips
+// screen before a round starts (see GameTips below) - added 19 September
+// 2026 after Decompose the Workflow's Claude/Existing System/Human split
+// turned out genuinely confusing without a memorable rule of thumb.
+// Deliberately generic (title/detail pairs + an optional worked example)
+// so every game gets a tips screen from the same component, not just the
+// one that prompted this.
+type GameTipsContent = {
+  intro: string;
+  tips: { title: string; detail: string }[];
+  example?: { label: string; walkthrough: string };
+};
+
+export const GAME_META: Record<
+  GameKey,
+  { title: string; blurb: string; icon: typeof PenLine; accent: string; domain?: string; tips: GameTipsContent }
+> = {
   spelling_sprint: {
     title: "Spelling Sprint",
     blurb: "Type the missing letters before you lose your streak.",
     icon: SpellCheck,
     accent: "emerald",
+    tips: {
+      intro: "Fill in the missing letters before the clock runs out.",
+      tips: [
+        { title: "Sound it out", detail: "Say the word slowly, sound by sound - most gaps follow exactly how the word sounds." },
+        { title: "Watch for patterns", detail: "Tricky spellings repeat the same patterns, like \"ight\", \"tion\", or \"ough\" - learn the pattern, not just the word." },
+        { title: "A wrong guess isn't the end", detail: "It only breaks your streak. Take your best shot and keep moving - there's no penalty for trying." },
+      ],
+    },
   },
   missing_letters: {
     title: "Missing Letters",
     blurb: "Same idea, tricky words - fill in what's missing.",
     icon: PenLine,
     accent: "sapphire",
+    tips: {
+      intro: "Same idea as Spelling Sprint, but with trickier words.",
+      tips: [
+        { title: "Use what's already there", detail: "The letters you're given usually tell you what part of the word is missing - read them before guessing." },
+        { title: "Break it into syllables", detail: "Sound out the word piece by piece rather than trying to picture the whole thing at once." },
+        { title: "Watch for silent letters", detail: "Words like \"know\" or \"comb\" hide a silent letter - if a word sounds too short, check for one." },
+      ],
+    },
   },
   word_meaning_match: {
     title: "Word Meaning Match",
     blurb: "Match each word to what it means.",
     icon: Link2,
     accent: "amethyst",
+    tips: {
+      intro: "Match each word to what it means.",
+      tips: [
+        { title: "Read the meaning first", detail: "Picture a sentence that uses the meaning before you look at the word choices - it's easier to spot the right match." },
+        { title: "Don't be fooled by similar sounds", detail: "Some wrong choices sound like the right word but mean something different - read carefully, not quickly." },
+        { title: "Pick the exact fit", detail: "When two choices seem close, pick the one that matches the meaning precisely, not just loosely." },
+      ],
+    },
   },
   homophone_hunter: {
     title: "Homophone Hunter",
     blurb: "Pick the right sound-alike word for the sentence.",
     icon: Ear,
     accent: "ruby",
+    tips: {
+      intro: "Pick the right sound-alike word for the sentence.",
+      tips: [
+        { title: "Read the whole sentence first", detail: "The right word only makes sense once you know what the whole sentence is saying - don't stop at the gap." },
+        { title: "Test each option in your head", detail: "Swap each choice into the sentence and check which one actually makes sense, not just which one sounds right." },
+        { title: "Learn the common ones first", detail: "their/there/they're, to/too/two, your/you're - most questions test these, so know them cold." },
+      ],
+    },
   },
   prefix_suffix_builder: {
     title: "Prefix/Suffix Builder",
     blurb: "Build a new word by adding a word part.",
     icon: Blocks,
     accent: "gold",
+    tips: {
+      intro: "Build a new word by adding a word part.",
+      tips: [
+        { title: "Front changes meaning, back changes usage", detail: "A prefix (like \"un-\" = not) usually flips or adjusts meaning; a suffix (like \"-ful\" = full of) usually changes how the word is used." },
+        { title: "Say the root word alone first", detail: "Know the base word on its own, then add the part - it's easier to hear whether the result sounds right." },
+        { title: "Trust your ear", detail: "If the new word doesn't sound like a real word, you've probably added the part to the wrong end." },
+      ],
+    },
+  },
+  decompose_the_workflow: {
+    title: "Decompose the Workflow",
+    blurb: "Who owns this step - Claude, an existing system, or a human?",
+    icon: Boxes,
+    accent: "sapphire",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Before you sort a step, ask what KIND of work it actually is - not just what it sounds like.",
+      tips: [
+        {
+          title: "Claude: language + judgment, against something already written down",
+          detail:
+            'Reading, interpreting, classifying, drafting, summarizing, or scoring - anything where Claude applies a documented rule or policy. Trigger words: read, interpret, classify, draft, summarize, score, match.',
+        },
+        {
+          title: "Existing System: mechanical, zero judgment",
+          detail:
+            "Looking something up, calculating, logging, updating a record, scheduling, or processing a payment - a plain read or write with no interpretation involved. Trigger words: look up, check, calculate, log, update, schedule, process, route.",
+        },
+        {
+          title: "Human: real stakes, or no rule exists yet",
+          detail:
+            "Approving an exception, waiving a fee, overriding policy, judging intent like fraud or risk, or authorizing something above a limit. Trigger words: approve (exception), waive, override, escalate, investigate, authorize, resolve a dispute.",
+        },
+        {
+          title: 'The trap word: "Decide"',
+          detail:
+            '"Decide" shows up on BOTH Claude\'s side and Human\'s side - that\'s what makes this confusing. Ask: is there already a written rule to apply? If yes, Claude is deciding within the rule. If it\'s an exception, a judgment about someone\'s intent, or a situation nobody\'s written a rule for yet, it\'s a Human\'s decision.',
+        },
+      ],
+      example: {
+        label: "Worked example - IT helpdesk ticket",
+        walkthrough:
+          '"Draft a reply explaining the fix" -> Claude (drafting from a known fix). "Log the ticket\'s resolution time" -> Existing System (pure record-keeping, no judgment). "Decide if this is a genuine security incident" -> Human (real stakes, and no simple rule covers it).',
+      },
+    },
+  },
+  platform_map_primitives: {
+    title: "Platform Map & Primitives",
+    blurb: "What does each building block of the Claude platform actually do?",
+    icon: MapIcon,
+    accent: "gold",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Match each primitive to what it actually does - these are the pieces you call from code to build with Claude.",
+      tips: [
+        {
+          title: "Group by job, not by name",
+          detail:
+            "Messages API sends and receives conversations. Tool use lets Claude call functions. Files and code execution handle data and running code. MCP connects external systems. Sort by what job something does, not by memorizing names in isolation.",
+        },
+        {
+          title: '"Give information" vs "let Claude act"',
+          detail:
+            "Some primitives feed Claude information (Files, web search, MCP resources); others let Claude DO something (tool use, code execution, computer use). Ask which side a primitive is on first.",
+        },
+        {
+          title: "Efficiency primitives are their own group",
+          detail:
+            "Prompt caching (reuse repeated context cheaply) and extended thinking (let Claude reason longer before answering) don't add a new capability - they change the cost or quality of a request you could already make.",
+        },
+      ],
+    },
+  },
+  pattern_selection: {
+    title: "Pattern Selection",
+    blurb: "Given a scenario, which architecture pattern actually fits?",
+    icon: Shapes,
+    accent: "ruby",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Sort each scenario into the pattern that fits - not the one that sounds most advanced.",
+      tips: [
+        {
+          title: "Start simple, add only what the scenario needs",
+          detail:
+            "A single agent with tools handles most tasks. Only reach for multi-agent orchestration when the work genuinely splits into independent sub-tasks that benefit from separate context.",
+        },
+        {
+          title: 'Look for "approve" or "review"',
+          detail: "Any scenario where a person must sign off before an action goes through needs a human-in-the-loop pattern, no matter how simple the rest of the task is.",
+        },
+        {
+          title: 'Look for "improve" or "check its own work"',
+          detail: "A scenario where one pass checks or refines another pass's output is an evaluator-optimizer loop - two roles, one improving the other's work.",
+        },
+        {
+          title: 'Look for "our own documents" or "information Claude wasn\'t trained on"',
+          detail: "If Claude needs facts it doesn't already know - your company's docs, live data - that's RAG-augmented, not a bigger model or a longer prompt.",
+        },
+      ],
+    },
+  },
+  reference_architectures: {
+    title: "Reference Architectures",
+    blurb: "Match each reference architecture to what actually defines it.",
+    icon: Building2,
+    accent: "amethyst",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Match each reference architecture to the trait that actually defines it.",
+      tips: [
+        { title: "Ask what problem it was built to solve", detail: "A reference architecture is defined by the problem it solves, not its diagram - match on purpose first." },
+        {
+          title: "Find its one distinguishing piece",
+          detail: "Most reference architectures differ by a single key component - a retrieval step, an approval gate, an orchestrator. Find that piece and the match follows.",
+        },
+        { title: "Don't match on scale or industry", detail: "The same reference architecture can serve a small team or a large enterprise - industry and size are distractors, not defining traits." },
+      ],
+    },
+  },
+  rag_pipeline_design: {
+    title: "RAG Pipeline Design",
+    blurb: "Sort each step into the RAG pipeline stage it belongs to.",
+    icon: Workflow,
+    accent: "emerald",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Sort each step into the stage it belongs to: Ingestion & Chunking, Embedding & Indexing, Retrieval, or Generation & Grounding.",
+      tips: [
+        {
+          title: "Follow the data, in order",
+          detail:
+            "Documents get split and cleaned first (ingestion), turned into vectors and stored (embedding/indexing), fetched by relevance for a query (retrieval), then handed to Claude to answer from (generation).",
+        },
+        { title: '"Chunk", "split", "clean" -> Ingestion', detail: "Anything that prepares raw documents before they're searchable belongs here." },
+        { title: '"Embed", "index", "store" -> Embedding & Indexing', detail: "Turning text into vectors and saving them for fast lookup - this happens once per document, not once per query." },
+        {
+          title: '"Rerank" vs "cite" is the retrieval/generation split',
+          detail: "Reranking and filtering results happens at Retrieval; citing sources and grounding the final answer happens at Generation - the difference is whether Claude has already started answering.",
+        },
+      ],
+    },
+  },
+  model_context_strategy: {
+    title: "Model & Context Strategy",
+    blurb: "True or false: model choice, context windows, and prompt caching tradeoffs.",
+    icon: Brain,
+    accent: "sapphire",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Quick true/false checks on model choice, context windows, and prompt caching - the tradeoffs, not just the terms.",
+      tips: [
+        { title: "Bigger model isn't always the right call", detail: "A more capable model costs more and can be slower - reach for it when the task needs deeper reasoning, not by default." },
+        {
+          title: "Context window and knowledge aren't the same thing",
+          detail: "A long context window means Claude can read a lot in one request - it doesn't mean Claude already knows your data. That's what RAG is for.",
+        },
+        {
+          title: "Prompt caching pays off on repetition, not size alone",
+          detail: "Caching helps when the same large context (a system prompt, a document) is reused across many requests - a single one-off huge prompt gets no benefit from it.",
+        },
+      ],
+    },
+  },
+  prompting_as_architecture: {
+    title: "Prompting as Architecture",
+    blurb: "Sort each prompting technique by the concern it actually solves.",
+    icon: Wand2,
+    accent: "gold",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Sort each technique into the architectural concern it solves - structure, framing, reasoning, or output control.",
+      tips: [
+        { title: "Structuring/Formatting", detail: "XML tags and clear sections organize a prompt so Claude can tell its parts apart - this is about layout, not content." },
+        { title: "Role & Task Framing", detail: "A system prompt or persona sets who Claude is being and what it's meant to accomplish, before any instructions arrive." },
+        {
+          title: "Reasoning Elicitation",
+          detail: "Chain-of-thought and extended thinking ask Claude to reason step by step before answering - useful when the task needs multi-step logic, not simple recall.",
+        },
+        { title: "Output Control", detail: "Few-shot examples and output prefilling shape the exact form of the answer - what it should look like, not how Claude should think to get there." },
+      ],
+    },
+  },
+  entry_points_governance: {
+    title: "Entry Points & Governance",
+    blurb: "Match each entry point or governance control to what it does.",
+    icon: ShieldCheck,
+    accent: "ruby",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Match each entry point or governance control to what it actually does.",
+      tips: [
+        {
+          title: "Three ways in, one thing they share",
+          detail:
+            "The Claude Developer Platform (direct API), cloud platforms (Amazon Bedrock, Google Vertex AI, Microsoft Foundry), and Claude's own apps (web/desktop/mobile) all reach the same models - they differ in billing, infrastructure, and enterprise controls, not capability.",
+        },
+        {
+          title: "Governance controls are about WHERE and WHO, not WHAT",
+          detail: "Data residency and inference-region settings control where a request runs; admin and workspace controls decide who can use what - neither changes what Claude can do.",
+        },
+        {
+          title: "Admin API manages the account, not the conversation",
+          detail: "Workspace creation, usage limits, and access controls are Admin API territory - separate from the Messages API that actually talks to Claude.",
+        },
+      ],
+    },
+  },
+  assembly_recap: {
+    title: "Assembly & Recap",
+    blurb: "Pull it together - which phase of the build does this step belong to?",
+    icon: ListChecks,
+    accent: "amethyst",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Pull it all together - which phase of designing a Claude-based solution does this step belong to?",
+      tips: [
+        {
+          title: "Four phases, roughly in order",
+          detail:
+            "Discover & Scope (what's the problem, what does success look like) -> Design & Prototype (pick the pattern, primitives, and prompting approach) -> Evaluate & Harden (test against real cases, add guardrails) -> Deploy & Operate (choose the entry point, set governance, monitor).",
+        },
+        { title: '"Which pattern fits" is Design, not Discover', detail: "Understanding the problem comes first; choosing HOW to solve it (a pattern, a pipeline) is a separate, later step." },
+        { title: "Guardrails belong to Evaluate & Harden", detail: "Handling edge cases, adding human review, and testing against real scenarios happens after a design exists, not before." },
+      ],
+    },
+  },
+  all_sections_mix: {
+    title: "All Sections Mix",
+    blurb: "Every section in this course, shuffled into one round.",
+    icon: Shuffle,
+    accent: "emerald",
+    domain: "Claude Platform & Solution Design",
+    tips: {
+      intro: "Every section in Claude Platform & Solution Design, shuffled into one round - a real test of whether it's all stuck.",
+      tips: [
+        { title: "No new rules here", detail: "Every question is pulled straight from the sections you've already practiced - if a question type looks unfamiliar, revisit that section's own tips first." },
+        {
+          title: "Watch for the switch",
+          detail: 'Because sections mix, the SAME word (like "decide") can mean something different depending on which section\'s question you\'re on - read the whole prompt, not just the trigger word.',
+        },
+        { title: "This is the one that counts", detail: "If you can move between sections without missing a beat here, you've actually learned the material, not just memorized one section's pattern." },
+      ],
+    },
   },
 };
 
@@ -114,6 +428,26 @@ function flattenToPrompts(questions: GameQuestion[]): Prompt[] {
           correctId: String(pair[1]),
         });
       });
+    } else if (q.questionType === "categorize") {
+      // Arcade's rapid-fire round engine only understands one prompt at a
+      // time, so a categorize question (several items, one shared bucket
+      // set) flattens into one "which bucket?" choice prompt per item -
+      // same treatment match_column gets just above. The real quiz shows
+      // the whole scenario as one board instead (Quiz.tsx) - see
+      // migration 0029 for why the two contexts differ.
+      const items = q.answerPayload?.items ?? [];
+      const buckets = q.answerPayload?.buckets ?? [];
+      const correctBucketIndex = q.answerPayload?.correctBucketIndex ?? [];
+      items.forEach((itemText, i) => {
+        const correct = correctBucketIndex[i];
+        if (typeof correct !== "number" || buckets.length === 0) return;
+        prompts.push({
+          kind: "choice",
+          promptText: itemText,
+          choices: buckets.map((b, idx) => ({ id: String(idx), text: b })),
+          correctId: String(correct),
+        });
+      });
     }
     // short_answer/long_answer never appear in a game's questionTypes
     // (see GAME_DEFINITIONS) - nothing to flatten for them.
@@ -179,6 +513,21 @@ export function Arcade({
   );
 }
 
+// Games with no `domain` (the 5 literacy games) fall in here - shown as
+// a flat grid exactly like before, with no topic step in front of it.
+const NO_DOMAIN = "__no_domain__";
+
+// GameMenu picks a game in one or two steps depending on the subject's
+// content. Most subjects (the literacy games) have no `domain` tag on
+// any of their games, so this behaves exactly as it always has: one flat
+// grid, no topic step. A subject like Claude Certified Architect -
+// Professional, where every available game carries a `domain` (see
+// GAME_META), gets a Topic step first (added 19 September 2026) - so
+// "Claude Platform & Solution Design" is chosen once, then its 10
+// sections show as the familiar flat grid. A subject that somehow mixes
+// domain-tagged and undomained games groups the undomained ones under a
+// synthetic "General Practice" topic card rather than silently hiding
+// them.
 function GameMenu({
   availableGames,
   error,
@@ -190,6 +539,8 @@ function GameMenu({
   onPick: (key: GameKey) => void;
   onExit: () => void;
 }) {
+  const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
+
   if (error) {
     return (
       <section className="mx-auto mt-10 w-full max-w-xl flex-1 text-center">
@@ -220,10 +571,28 @@ function GameMenu({
     );
   }
 
+  const domains = Array.from(new Set(availableGames.map((k) => GAME_META[k].domain ?? NO_DOMAIN)));
+  const hasTopics = domains.some((d) => d !== NO_DOMAIN);
+
+  if (hasTopics && selectedDomain === null) {
+    return <TopicPicker domains={domains} availableGames={availableGames} onPick={setSelectedDomain} onExit={onExit} />;
+  }
+
+  const gamesToShow = hasTopics
+    ? availableGames.filter((k) => (GAME_META[k].domain ?? NO_DOMAIN) === selectedDomain)
+    : availableGames;
+  const goBack = hasTopics ? () => setSelectedDomain(null) : onExit;
+  const backLabel = hasTopics ? "Back to topics" : "Back";
+
   return (
     <section className="mx-auto mt-10 w-full max-w-2xl flex-1">
+      {hasTopics && (
+        <p className="mb-5 text-center text-sm font-display font-bold text-muted-foreground">
+          {selectedDomain === NO_DOMAIN ? "General Practice" : selectedDomain}
+        </p>
+      )}
       <div className="grid gap-5 sm:grid-cols-2">
-        {availableGames.map((key, i) => {
+        {gamesToShow.map((key, i) => {
           const meta = GAME_META[key];
           const Icon = meta.icon;
           return (
@@ -249,6 +618,62 @@ function GameMenu({
         Stars from games count toward your kingdom total, same as quests.
       </p>
       <div className="mt-4 flex justify-center">
+        <Button variant="ghost" onClick={goBack}>
+          {backLabel}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// The topic step shown only when a subject's games span at least one
+// `domain` - one card per domain (plus a "General Practice" card for any
+// undomained games sharing the subject, if there are any). A domain has
+// no metadata of its own (it's just a label on each game), so its card
+// borrows the first game's icon/accent in that group and counts its
+// sections rather than needing a separate lookup table to keep in sync.
+function TopicPicker({
+  domains,
+  availableGames,
+  onPick,
+  onExit,
+}: {
+  domains: string[];
+  availableGames: GameKey[];
+  onPick: (domain: string) => void;
+  onExit: () => void;
+}) {
+  return (
+    <section className="mx-auto mt-10 w-full max-w-2xl flex-1">
+      <p className="mb-5 text-center text-sm text-muted-foreground">Choose a topic to practice.</p>
+      <div className="grid gap-5 sm:grid-cols-2">
+        {domains.map((domain, i) => {
+          const gamesInDomain = availableGames.filter((k) => (GAME_META[k].domain ?? NO_DOMAIN) === domain);
+          const first = GAME_META[gamesInDomain[0]];
+          const Icon = first.icon;
+          const label = domain === NO_DOMAIN ? "General Practice" : domain;
+          return (
+            <button
+              key={domain}
+              onClick={() => onPick(domain)}
+              style={{ animationDelay: `${i * 60}ms` }}
+              className="animate-pop-in shadow-quest flex flex-col items-center rounded-3xl border border-border/70 bg-card/85 p-6 text-center backdrop-blur transition-transform hover:-translate-y-1.5 hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <span className={`animate-float grid size-16 place-items-center rounded-full bg-secondary ${ACCENT_TEXT[first.accent]}`}>
+                <Icon className="size-8" />
+              </span>
+              <span className="mt-4 text-xl font-display font-bold">{label}</span>
+              <span className="mt-1 text-sm text-muted-foreground">
+                {gamesInDomain.length} section{gamesInDomain.length === 1 ? "" : "s"} to practice
+              </span>
+              <span className="mt-4 rounded-full bg-primary px-5 py-2 text-sm font-display font-bold text-primary-foreground">
+                Choose
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-8 flex justify-center">
         <Button variant="ghost" onClick={onExit}>
           Back
         </Button>
@@ -259,6 +684,62 @@ function GameMenu({
 
 const ROUND_SIZE = 10;
 const PROMPT_SECONDS = 20;
+
+// Shown once before a round starts: what this game is testing, a handful
+// of memorable rules of thumb, and (for games where it helps) one worked
+// example. Content lives per-game in GAME_META[key].tips above - this
+// component just renders whatever it's handed, so every game gets a tips
+// screen for free rather than needing its own bespoke one.
+function GameTips({
+  meta,
+  onStart,
+  onExit,
+}: {
+  meta: (typeof GAME_META)[GameKey];
+  onStart: () => void;
+  onExit: () => void;
+}) {
+  const Icon = meta.icon;
+  return (
+    <section className="animate-pop-in mx-auto mt-8 w-full max-w-xl flex-1">
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" className="rounded-full" onClick={onExit} aria-label="Back">
+          <ArrowLeft className="size-5" />
+        </Button>
+        <span className={`grid size-11 place-items-center rounded-full bg-secondary ${ACCENT_TEXT[meta.accent]}`}>
+          <Icon className="size-6" />
+        </span>
+        <div>
+          <h2 className="text-xl font-display font-bold">{meta.title}</h2>
+          <p className="text-sm text-muted-foreground">{meta.tips.intro}</p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-3">
+        {meta.tips.tips.map((tip, i) => (
+          <div key={i} className="flex gap-3 rounded-2xl border border-border/70 bg-card/85 p-4">
+            <Lightbulb className={`mt-0.5 size-5 shrink-0 ${ACCENT_TEXT[meta.accent]}`} />
+            <div>
+              <p className="font-semibold">{tip.title}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{tip.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {meta.tips.example && (
+        <div className={`mt-4 rounded-2xl border-2 border-dashed p-4 ${ACCENT_TEXT[meta.accent]} border-current/40`}>
+          <p className={`text-sm font-display font-bold ${ACCENT_TEXT[meta.accent]}`}>{meta.tips.example.label}</p>
+          <p className="mt-1 text-sm text-foreground/90">{meta.tips.example.walkthrough}</p>
+        </div>
+      )}
+
+      <div className="mt-7 flex justify-center">
+        <Button onClick={onStart}>Start game</Button>
+      </div>
+    </section>
+  );
+}
 
 function ArcadeRound({
   game,
@@ -289,6 +770,12 @@ function ArcadeRound({
   const [finished, setFinished] = useState(false);
   const [starsEarned, setStarsEarned] = useState<number | null>(null);
   const [savingResult, setSavingResult] = useState(false);
+  // Tips-before-you-play gate (19 September 2026) - true only after the
+  // player taps "Start game" on the GameTips screen below. Stays true
+  // across a same-session "Play again" (this component doesn't remount
+  // for that), so tips are only forced once per visit to a game, not once
+  // per round.
+  const [ready, setReady] = useState(false);
 
   // Activity time tracking (11 September 2026) - see
   // useActivityHeartbeat.ts. Stops the moment the round finishes rather
@@ -403,6 +890,10 @@ function ArcadeRound({
         </div>
       </section>
     );
+  }
+
+  if (!ready) {
+    return <GameTips meta={meta} onStart={() => setReady(true)} onExit={onExit} />;
   }
 
   if (!prompts) {

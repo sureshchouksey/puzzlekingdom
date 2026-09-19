@@ -78,11 +78,30 @@ function formatDate(iso: string): string {
 // picked a subject yet" and keeps the player on the subject step.
 type SubjectChoice = "all" | string;
 
-export function Reports({ onBack }: { onBack: () => void }) {
+export function Reports({
+  onBack,
+  initialClass,
+  initialSubject,
+}: {
+  onBack: () => void;
+  // When Reports is opened from inside a specific class (SubjectPicker's
+  // "View progress" button, or Cert Prep's Progress report tile), start
+  // scoped to that class instead of the top-level "Which class?" picker -
+  // otherwise every "View progress" click drops the player back out to
+  // picking from every class in the app, which reads as a redirect away
+  // from wherever they actually were (see the "Take a quiz" bug this
+  // mirrors, fixed earlier for Cert Prep's own quiz entry point).
+  initialClass?: PkClass;
+  // Set only by Certification Prep's hub (19 September 2026 flow
+  // rework), which now picks the certification once, upfront - this
+  // skips the "subject" step below entirely and lands directly on the
+  // report itself.
+  initialSubject?: string;
+}) {
   const [classes, setClasses] = useState<PkClass[] | null>(null);
-  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(initialClass?.id ?? null);
   const [subjects, setSubjects] = useState<Subject[] | null>(null);
-  const [selectedSubject, setSelectedSubject] = useState<SubjectChoice | null>(null);
+  const [selectedSubject, setSelectedSubject] = useState<SubjectChoice | null>(initialSubject ?? null);
 
   const [topicReports, setTopicReports] = useState<TopicReport[] | null>(null);
   const [attempts, setAttempts] = useState<AttemptReport[] | null>(null);
@@ -130,12 +149,24 @@ export function Reports({ onBack }: { onBack: () => void }) {
   const step: "class" | "subject" | "report" = !selectedClassId ? "class" : !selectedSubject ? "subject" : "report";
 
   function goBack() {
-    if (step === "report") setSelectedSubject(null);
-    else if (step === "subject") setSelectedClassId(null);
-    else onBack();
+    if (step === "report") {
+      // initialSubject means there was never a real "subject" step here
+      // either - it was chosen upstream on CertPrepHub - so backing out
+      // of "report" leaves Reports entirely instead of re-showing a
+      // one-item subject list.
+      if (initialSubject) onBack();
+      else setSelectedSubject(null);
+    } else if (step === "subject") {
+      // Only drop into the top-level class list if the player actually
+      // came from picking one here - if they arrived already scoped to a
+      // class (initialClass), backing out of the subject step should
+      // leave Reports entirely, not surface every other class in the app.
+      if (initialClass) onBack();
+      else setSelectedClassId(null);
+    } else onBack();
   }
 
-  const pkClass = classes?.find((c) => c.id === selectedClassId) ?? null;
+  const pkClass = classes?.find((c) => c.id === selectedClassId) ?? initialClass ?? null;
   const subjectLabel = selectedSubject === "all" ? "All subjects" : selectedSubject;
 
   // Overview stats, computed client-side from the same two calls above -

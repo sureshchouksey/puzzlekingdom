@@ -13,6 +13,16 @@ export type PkClass = {
 
 // A lightweight named player - no password, no login. "Who's playing" is
 // picked from a list (or created) at the Welcome screen.
+// A flashcard for Certification Prep (or any future subject) - see
+// apps/api/src/routes/flashcards.ts. topic is optional (unset cards match
+// no topic filter but still appear in an "all topics" view).
+export type Flashcard = {
+  id: string;
+  topic: string | null;
+  front: string;
+  back: string;
+};
+
 export type Profile = {
   id: string;
   name: string;
@@ -113,7 +123,20 @@ export type GameKey =
   | "missing_letters"
   | "word_meaning_match"
   | "homophone_hunter"
-  | "prefix_suffix_builder";
+  | "prefix_suffix_builder"
+  // Claude Platform & Solution Design domain (Claude Certified Architect
+  // - Professional practice) - see GAME_DEFINITIONS in
+  // apps/api/src/routes/games.ts, which this mirrors exactly.
+  | "decompose_the_workflow"
+  | "platform_map_primitives"
+  | "pattern_selection"
+  | "reference_architectures"
+  | "rag_pipeline_design"
+  | "model_context_strategy"
+  | "prompting_as_architecture"
+  | "entry_points_governance"
+  | "assembly_recap"
+  | "all_sections_mix";
 
 // One question as returned by GET /games/round - deliberately carries the
 // FULL answer key (correctOptionId / answerPayload, not stripped the way
@@ -263,6 +286,11 @@ export type QuizResults = {
   totalStages: number;
   stagesCleared: number;
   completedAt: string;
+  // Per-topic accuracy for this attempt (see the API's buildTopicBreakdown)
+  // - used by MockExamResults.tsx as a stand-in for the real exam's
+  // domain-weighted score, since topics here are tagged by each
+  // certification's real module/domain names.
+  topicBreakdown: Record<string, { correct: number; total: number }>;
   answers: ResultsAnswer[];
 };
 
@@ -405,7 +433,8 @@ export type QuestionType =
   | "missing_spelling"
   | "match_column"
   | "short_answer"
-  | "long_answer";
+  | "long_answer"
+  | "categorize";
 
 // The answerPayload shapes lib/scoring.ts (apps/api) grades against -
 // kept as one loose union here rather than importing from the API, since
@@ -419,6 +448,12 @@ export type AnswerPayload = {
   right?: string[];
   correctPairs?: [number, number][];
   rubricKeyPoints?: string[];
+  // categorize: items to sort, the (usually few, shared) bucket labels,
+  // and which bucket index is correct for each item - withheld pre-answer
+  // the same way correctPairs is (see quizzes.ts's assemblyAnswerPayload).
+  items?: string[];
+  buckets?: string[];
+  correctBucketIndex?: number[];
 };
 
 // One question row as shown in the admin dashboard's question list -

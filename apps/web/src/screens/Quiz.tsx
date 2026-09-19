@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, PartyPopper, Sparkles } from "lucide-react";
+import { ArrowLeft, Clock, PartyPopper, RotateCcw, Sparkles } from "lucide-react";
 import { submitStage } from "../api";
 import { useActivityHeartbeat } from "../hooks/useActivityHeartbeat";
 import { AnswerReviewCard } from "../components/AnswerReviewCard";
@@ -15,6 +15,14 @@ function chunkIntoStages(qs: QuizQuestion[], stageSize: number): QuizQuestion[][
     stages.push(qs.slice(i, i + stageSize));
   }
   return stages;
+}
+
+// mm:ss for the mock-exam countdown badge - never more than a couple of
+// hours on any real exam, so no need to handle an hours place.
+function formatTime(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 const LETTERS = "ABCDEFGH";
@@ -36,8 +44,11 @@ function isQuestionAnswered(question: QuizQuestion, answer: DraftAnswer | undefi
   if (answer.kind === "option") return answer.optionId.length > 0;
   if (answer.kind === "text") return answer.text.trim().length > 0;
   // match_column: answered once every left item has been paired with
-  // something - partial pairing (e.g. 2 of 5 done) doesn't count yet.
-  const total = question.answerPayload?.left?.length ?? 0;
+  // something; categorize: answered once every item has a bucket -
+  // partial pairing (e.g. 2 of 5 done) doesn't count yet. Reuses the same
+  // DraftAnswer "pairs" shape for both - see the categorize board below
+  // for why that's a safe reuse, not a hack.
+  const total = question.answerPayload?.left?.length ?? question.answerPayload?.items?.length ?? 0;
   return total > 0 && answer.pairs.length >= total;
 }
 
@@ -56,6 +67,8 @@ export function Quiz({
   onExit,
   onSubmitted,
   onExplain,
+  mode = "kid",
+  timeLimitMinutes,
 }: {
   quiz: AssembleQuizResponse;
   // Lets the player back out mid-quiz - e.g. to pick a different topic or
@@ -70,8 +83,20 @@ export function Quiz({
   // - the app's own UI always supplies one, but the type keeps it
   // nullable since the backend route itself doesn't require one.
   onExplain: (context: TutorQuestionContext) => void;
+  // Mock Exam mode (18 September 2026) - purely additive, defaults to the
+  // unchanged kid quiz experience. "exam" swaps the night-sky/gold quiz
+  // chrome for the neutral .parchment surface, removes the "must answer
+  // to continue" guard (a real exam lets you skip and come back), relaxes
+  // the "not quite, try again" interstitial's copy/icon for a whole-exam
+  // retake rather than a stage retry, and - when timeLimitMinutes is also
+  // given - shows a countdown that auto-submits on expiry. CertPrepHub's
+  // mock test flow is the only caller that passes either of these; every
+  // other Quiz.tsx caller in the app is unaffected.
+  mode?: "kid" | "exam";
+  timeLimitMinutes?: number;
 }) {
   const stages = useMemo(() => chunkIntoStages(quiz.questions, quiz.stageSize), [quiz.questions, quiz.stageSize]);
+  const surfaceClass = mode === "exam" ? "parchment" : "night-sky";
 
   // Resumed quizzes (see resumeQuiz in api.ts) carry stagesCleared -
   // start at that stage instead of stage 1, so the player picks up
@@ -83,6 +108,12 @@ export function Quiz({
   // Set right after a non-final stage is scored - shows the "stage
   // cleared" interstitial until the player chooses to continue.
   const [stageResult, setStageResult] = useState<SubmitStageResponse | null>(null);
+  // Mock-exam countdown - null whenever timeLimitMinutes wasn't given
+  // (every kid-mode call), so the whole timer UI/effect below is inert
+  // there.
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(
+    timeLimitMinutes ? Math.round(timeLimitMinutes * 60) : null
+  );
 
   const currentStage = stages[currentStageIndex] ?? [];
   // One question shown at a time on-screen (mobile-friendly) - this tracks
@@ -106,10 +137,10 @@ export function Quiz({
     topic: question?.topics?.[0],
   });
 
-  // match_column's "tap a left item, then tap a right item to pair them"
-  // flow needs to know which left item is currently armed - reset
-  // whenever the on-screen question changes so an armed selection from
-  // one match-the-column question never bleeds into the next.
+  // match_column's and categorize's "tap a left item/item, then tap its
+  // match/bucket to pair them" flows both need to know which left item is
+  // currently armed - reset whenever the on-screen question changes so an
+  // armed selection from one question never bleeds into the next.
   const [armedLeftIndex, setArmedLeftIndex] = useState<number | null>(null);
   useEffect(() => {
     setArmedLeftIndex(null);
@@ -163,6 +194,24 @@ export function Quiz({
     }
   }
 
+  // Ticks the mock-exam countdown down once a second and auto-submits
+  // whatever's answered so far when it reaches zero - same as a real
+  // proctored exam timing out rather than waiting for a manual submit.
+  // Self-scheduling (setTimeout-that-reschedules-itself) rather than a
+  // single setInterval, so each tick's finishStage() call closes over
+  // fresh state instead of whatever `answers` looked like when the
+  // interval was first created.
+  useEffect(() => {
+    if (secondsLeft === null || stageResult) return;
+    if (secondsLeft <= 0) {
+      finishStage();
+      return;
+    }
+    const t = setTimeout(() => setSecondsLeft((s) => (s === null ? null : s - 1)), 1000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secondsLeft, stageResult]);
+
   function continueToNextStage() {
     setStageResult(null);
     setCurrentQuestionIndex(0);
@@ -189,8 +238,8 @@ export function Quiz({
     let reviewNumber = 0;
 
     return (
-      <main className="night-sky relative min-h-screen overflow-hidden pb-16">
-        <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+      <main className={`${surfaceClass} relative min-h-screen overflow-hidden pb-16`}>
+        {mode !== "exam" && <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />}
         <div className="relative mx-auto w-full max-w-2xl px-6 py-10">
           <header className="flex items-center justify-between gap-4">
             <Button variant="ghost" size="icon" className="rounded-full" onClick={onExit} aria-label="Exit quiz">
@@ -198,13 +247,24 @@ export function Quiz({
             </Button>
             <div className="flex-1 text-center">
               <span className="animate-float shadow-glow mx-auto grid size-20 place-items-center rounded-full bg-primary text-primary-foreground">
-                {stageResult.passed ? <PartyPopper className="size-9" /> : <Sparkles className="size-9" />}
+                {mode === "exam" ? (
+                  <RotateCcw className="size-9" />
+                ) : stageResult.passed ? (
+                  <PartyPopper className="size-9" />
+                ) : (
+                  <Sparkles className="size-9" />
+                )}
               </span>
               <h1 className="mt-4 text-3xl">
-                {stageResult.passed ? `Stage ${stageResult.stagesCleared} cleared!` : "Not quite — give this stage another go"}
+                {mode === "exam"
+                  ? "Below the passing mark"
+                  : stageResult.passed
+                    ? `Stage ${stageResult.stagesCleared} cleared!`
+                    : "Not quite — give this stage another go"}
               </h1>
               <p className="mt-1 text-muted-foreground">
-                {stageResult.stageScore} / {stageResult.stageTotal} correct this stage ({stagePercent}%)
+                {stageResult.stageScore} / {stageResult.stageTotal} correct
+                {mode === "exam" ? "" : " this stage"} ({stagePercent}%)
               </p>
             </div>
             <span className="size-9" />
@@ -220,11 +280,13 @@ export function Quiz({
               <span className="absolute top-0 h-full w-0.5 bg-foreground/60" style={{ left: `${cutoffPercent}%` }} />
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              {stageResult.passed
-                ? stagesToGo > 0
-                  ? `${stagesToGo} stage${stagesToGo === 1 ? "" : "s"} to go`
-                  : "That was the last stage!"
-                : `You need at least ${cutoffPercent}% to clear a stage — the line shows the target.`}
+              {mode === "exam"
+                ? `You needed at least ${cutoffPercent}% correct to pass this mock exam - the line shows the target.`
+                : stageResult.passed
+                  ? stagesToGo > 0
+                    ? `${stagesToGo} stage${stagesToGo === 1 ? "" : "s"} to go`
+                    : "That was the last stage!"
+                  : `You need at least ${cutoffPercent}% to clear a stage — the line shows the target.`}
             </p>
 
             <ol className="mt-6 space-y-3">
@@ -261,7 +323,7 @@ export function Quiz({
               </Button>
             ) : (
               <Button size="lg" className="rounded-full font-display" onClick={retryStage}>
-                Retry this stage
+                {mode === "exam" ? "Retake mock exam" : "Retry this stage"}
               </Button>
             )}
           </div>
@@ -273,8 +335,8 @@ export function Quiz({
   const draft = question ? answers[question.id] : undefined;
 
   return (
-    <main className="night-sky relative min-h-screen overflow-hidden pb-24">
-      <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+    <main className={`${surfaceClass} relative min-h-screen overflow-hidden pb-24`}>
+      {mode !== "exam" && <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />}
       <div className="relative mx-auto w-full max-w-2xl px-6 py-8">
         <header className="flex items-center justify-between gap-4">
           <Button variant="ghost" size="icon" className="rounded-full" onClick={onExit} aria-label="Exit quiz">
@@ -283,10 +345,23 @@ export function Quiz({
           <div className="text-center">
             <p className="text-xs font-semibold tracking-[0.28em] text-primary/80 uppercase">{quiz.subjectName}</p>
             <h1 className="text-2xl sm:text-3xl">
-              Stage {currentStageIndex + 1} of {stages.length}
+              {mode === "exam" ? "Mock Exam" : `Stage ${currentStageIndex + 1} of ${stages.length}`}
             </h1>
           </div>
-          <span className="size-9" />
+          {mode === "exam" && secondsLeft !== null ? (
+            <span
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold tabular-nums ${
+                secondsLeft <= 300
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : "border-border bg-card text-foreground"
+              }`}
+            >
+              <Clock className="size-4" />
+              {formatTime(secondsLeft)}
+            </span>
+          ) : (
+            <span className="size-9" />
+          )}
         </header>
 
         {/* Per-question progress within the current stage (e.g. "2 / 10") -
@@ -425,6 +500,52 @@ export function Quiz({
                   </div>
                 </div>
               )}
+
+              {question.questionType === "categorize" && question.answerPayload?.items && (
+                <div className="mt-5">
+                  <p className="mb-3 text-sm text-muted-foreground">Tap an item, then tap where it belongs.</p>
+                  <div className="flex flex-col gap-2">
+                    {question.answerPayload.items.map((text, ii) => {
+                      const pairs = draft?.kind === "pairs" ? draft.pairs : [];
+                      const assignedBucket = pairs.find(([i]) => i === ii)?.[1];
+                      const isArmed = armedLeftIndex === ii;
+                      const bucketLabel = assignedBucket !== undefined ? question.answerPayload?.buckets?.[assignedBucket] : undefined;
+                      return (
+                        <button
+                          key={ii}
+                          onClick={() => toggleArmLeft(ii)}
+                          className={`rounded-xl border-2 px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
+                            isArmed
+                              ? "border-primary bg-primary/25 text-primary"
+                              : bucketLabel
+                                ? "border-primary bg-primary/15 text-primary"
+                                : "border-border bg-secondary/60"
+                          }`}
+                        >
+                          {text}
+                          {bucketLabel ? ` → ${bucketLabel}` : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {/* Buckets are always tappable, unlike match_column's right
+                      column - several items can (and should be able to)
+                      share the same bucket, so a bucket never gets marked
+                      "used up" the way a match_column right-item does. */}
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    {(question.answerPayload.buckets ?? []).map((text, bi) => (
+                      <button
+                        key={bi}
+                        onClick={() => pairWithRight(question.id, bi)}
+                        disabled={armedLeftIndex === null}
+                        className="rounded-xl border-2 border-border bg-secondary/60 px-3 py-3 text-center text-sm font-semibold transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {text}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
           </div>
         )}
@@ -445,22 +566,30 @@ export function Quiz({
                 size="lg"
                 className="h-14 flex-[1.4] rounded-2xl text-lg font-display"
                 onClick={finishStage}
-                disabled={!allAnswered || submitting}
+                disabled={(mode !== "exam" && !allAnswered) || submitting}
               >
-                {submitting ? "Submitting..." : currentStageIndex + 1 === stages.length ? "Finish quiz" : "Finish stage"}
+                {submitting
+                  ? "Submitting..."
+                  : mode === "exam"
+                    ? "Submit exam"
+                    : currentStageIndex + 1 === stages.length
+                      ? "Finish quiz"
+                      : "Finish stage"}
               </Button>
             ) : (
               <Button
                 size="lg"
                 className="h-14 flex-[1.4] rounded-2xl text-lg font-display"
                 onClick={() => setCurrentQuestionIndex((i) => Math.min(currentStage.length - 1, i + 1))}
-                disabled={!isAnswered}
+                disabled={mode !== "exam" && !isAnswered}
               >
                 Next
               </Button>
             )}
           </div>
-          {!isAnswered && <p className="mt-3 text-sm text-muted-foreground">Answer this question to continue.</p>}
+          {mode !== "exam" && !isAnswered && (
+            <p className="mt-3 text-sm text-muted-foreground">Answer this question to continue.</p>
+          )}
           {error && <p className="mt-3 text-sm font-medium text-destructive">{error}</p>}
         </div>
       </div>

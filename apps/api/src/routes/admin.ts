@@ -132,6 +132,24 @@ export async function adminRoutes(app: FastifyInstance) {
         word_meaning_match: settings.arcadeEnabled && settings.gameWordMeaningMatchEnabled,
         homophone_hunter: settings.arcadeEnabled && settings.gameHomophoneHunterEnabled,
         prefix_suffix_builder: settings.arcadeEnabled && settings.gamePrefixSuffixBuilderEnabled,
+        // No dedicated toggle column yet (unlike the 5 games above) -
+        // games.ts's isGameEnabled() already falls back to "on whenever
+        // the arcade master switch is on" for any gameKey missing from
+        // GAME_ENABLED_FIELD, so this mirrors that same real behavior
+        // rather than claiming a false "always on regardless of arcade"
+        // that a game-specific admin toggle could later contradict. Same
+        // for the 9 Claude Platform & Solution Design sections added 19
+        // September 2026 alongside decompose_the_workflow.
+        decompose_the_workflow: settings.arcadeEnabled,
+        platform_map_primitives: settings.arcadeEnabled,
+        pattern_selection: settings.arcadeEnabled,
+        reference_architectures: settings.arcadeEnabled,
+        rag_pipeline_design: settings.arcadeEnabled,
+        model_context_strategy: settings.arcadeEnabled,
+        prompting_as_architecture: settings.arcadeEnabled,
+        entry_points_governance: settings.arcadeEnabled,
+        assembly_recap: settings.arcadeEnabled,
+        all_sections_mix: settings.arcadeEnabled,
       },
     };
   });

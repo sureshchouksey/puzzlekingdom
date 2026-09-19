@@ -26,14 +26,123 @@ type QuestionTypeValue =
   | "missing_spelling"
   | "match_column"
   | "short_answer"
-  | "long_answer";
+  | "long_answer"
+  | "categorize";
 
-const GAME_DEFINITIONS: Record<string, { questionTypes: QuestionTypeValue[]; topic?: string }> = {
+// `domain` (added 19 September 2026) is a purely cosmetic grouping label
+// for the Arcade menu - see GameMenu in Arcade.tsx, which shows a
+// Topic-picker step first whenever a subject's available games carry a
+// domain, and falls back to today's flat grid when none do. It has no
+// effect on content filtering; `topic` (below) is still what selects
+// which questions belong to a game.
+//
+// `topic` also now accepts a list, for "mix everything" games like
+// all_sections_mix that should pull from several sibling sections' tagged
+// content at once rather than one topic in isolation.
+const GAME_DEFINITIONS: Record<string, { questionTypes: QuestionTypeValue[]; topic?: string | string[]; domain?: string }> = {
   spelling_sprint: { questionTypes: ["missing_spelling"] },
   missing_letters: { questionTypes: ["missing_spelling"] },
   word_meaning_match: { questionTypes: ["match_column"], topic: "Word Meanings" },
   homophone_hunter: { questionTypes: ["mcq", "fill_blank"], topic: "Homophones" },
   prefix_suffix_builder: { questionTypes: ["fill_blank"], topic: "Prefixes & Suffixes" },
+
+  // Claude Certified Architect - Professional practice, grouped under one
+  // Arcade "topic" (domain) - see plan doc for the section list. Every
+  // section below is original content, authored from Anthropic's public
+  // docs (platform.claude.com), never from the paid certification course
+  // itself - same discipline decompose_the_workflow's content followed.
+  //
+  // Claude Certified Architect - Professional practice: sort each
+  // capability into who owns it (Claude / an existing system / a human) -
+  // see migration 0029. Topic-gated for the same reason
+  // word_meaning_match is: a categorize question could just as easily be
+  // some other subject's sorting exercise later.
+  decompose_the_workflow: {
+    questionTypes: ["categorize"],
+    topic: "Task Decomposition",
+    domain: "Claude Platform & Solution Design",
+  },
+  // Recall of the platform's core building blocks (Messages API, tool
+  // use, MCP, Files API, code execution, computer use, prompt caching,
+  // Agent SDK, Claude Code, Admin API, etc.) - plain mcq fits best, since
+  // this is "what is this thing / what does it do", not a sorting task.
+  platform_map_primitives: {
+    questionTypes: ["mcq"],
+    topic: "Platform Map & Primitives",
+    domain: "Claude Platform & Solution Design",
+  },
+  // Given a scenario, sort it into the architecture pattern that fits -
+  // categorize, same shape as decompose_the_workflow (bucket = pattern
+  // name, items = scenarios).
+  pattern_selection: {
+    questionTypes: ["categorize"],
+    topic: "Pattern Selection",
+    domain: "Claude Platform & Solution Design",
+  },
+  // Pairing a reference architecture with its defining characteristic -
+  // match_column fits a 1:1 pairing better than a shared-bucket sort.
+  reference_architectures: {
+    questionTypes: ["match_column"],
+    topic: "Reference Architectures",
+    domain: "Claude Platform & Solution Design",
+  },
+  // Sort a RAG pipeline step into the stage it belongs to (ingestion,
+  // retrieval, generation, etc.) - categorize again, different buckets.
+  rag_pipeline_design: {
+    questionTypes: ["categorize"],
+    topic: "RAG Pipeline Design",
+    domain: "Claude Platform & Solution Design",
+  },
+  // Quick true/false concept checks on model choice, context-window and
+  // prompt-caching tradeoffs - true_false suits a fast recap better than
+  // a sorting task here.
+  model_context_strategy: {
+    questionTypes: ["true_false"],
+    topic: "Model & Context Strategy",
+    domain: "Claude Platform & Solution Design",
+  },
+  // Sort a prompting technique (XML tags, chain-of-thought, prefilling,
+  // few-shot, system prompt) into the architectural concern it solves -
+  // categorize.
+  prompting_as_architecture: {
+    questionTypes: ["categorize"],
+    topic: "Prompting as Architecture",
+    domain: "Claude Platform & Solution Design",
+  },
+  // Pairing a governance control or entry point (API, Bedrock, Vertex,
+  // Foundry, Claude Apps, Admin API controls) with what it actually does
+  // - match_column.
+  entry_points_governance: {
+    questionTypes: ["match_column"],
+    topic: "Entry Points & Governance",
+    domain: "Claude Platform & Solution Design",
+  },
+  // Capstone recap across the whole domain - mcq scenario questions
+  // pulling the earlier sections together.
+  assembly_recap: {
+    questionTypes: ["mcq"],
+    topic: "Assembly & Recap",
+    domain: "Claude Platform & Solution Design",
+  },
+  // The "mix everything" game - same 4 question types used across the 8
+  // sections above (plus Decompose), topic-gated to the union of all 9
+  // section topics rather than one, so a round can pull from the whole
+  // domain's content pool instead of a single section.
+  all_sections_mix: {
+    questionTypes: ["mcq", "true_false", "match_column", "categorize"],
+    topic: [
+      "Task Decomposition",
+      "Platform Map & Primitives",
+      "Pattern Selection",
+      "Reference Architectures",
+      "RAG Pipeline Design",
+      "Model & Context Strategy",
+      "Prompting as Architecture",
+      "Entry Points & Governance",
+      "Assembly & Recap",
+    ],
+    domain: "Claude Platform & Solution Design",
+  },
 };
 
 // Flag-based feature management (migration 0023) - which app_settings
@@ -60,11 +169,24 @@ function isGameEnabled(settings: AppSettings, gameKey: string): boolean {
 // Shared by GET /games/round and GET /games/available, so "does this game
 // have any matching content" and "assemble a round for it" always agree
 // on exactly what counts.
-function conditionsFor(definition: { questionTypes: QuestionTypeValue[]; topic?: string }, subjectId: string | undefined, classId: string | undefined) {
+function conditionsFor(
+  definition: { questionTypes: QuestionTypeValue[]; topic?: string | string[] },
+  subjectId: string | undefined,
+  classId: string | undefined
+) {
   const conditions = [inArray(questions.questionType, definition.questionTypes)];
   if (subjectId) conditions.push(eq(questions.subjectId, subjectId));
   if (classId) conditions.push(eq(documents.classId, classId));
-  if (definition.topic) conditions.push(sql`${questions.topics} @> ARRAY[${definition.topic}]::text[]`);
+  if (definition.topic) {
+    if (Array.isArray(definition.topic)) {
+      // Overlap (&&), not containment (@>) - matches a question tagged
+      // with ANY one of the listed topics, e.g. all_sections_mix pulling
+      // from every sibling section's content at once.
+      conditions.push(sql`${questions.topics} && ARRAY[${sql.join(definition.topic.map((t) => sql`${t}`), sql`, `)}]::text[]`);
+    } else {
+      conditions.push(sql`${questions.topics} @> ARRAY[${definition.topic}]::text[]`);
+    }
+  }
   return conditions;
 }
 
@@ -129,7 +251,9 @@ export async function gameRoutes(app: FastifyInstance) {
 
     if (picked.length === 0) {
       return reply.status(404).send({
-        error: `No questions saved yet for the "${gameKey}" game matching those filters. Add some ${definition.questionTypes.join("/")} questions${definition.topic ? ` tagged "${definition.topic}"` : ""} in the admin dashboard first.`,
+        error: `No questions saved yet for the "${gameKey}" game matching those filters. Add some ${definition.questionTypes.join("/")} questions${
+        definition.topic ? ` tagged "${Array.isArray(definition.topic) ? definition.topic.join('" or "') : definition.topic}"` : ""
+      } in the admin dashboard first.`,
       });
     }
 

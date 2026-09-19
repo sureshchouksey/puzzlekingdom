@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db/client.js";
 import { families, familyOwners, profiles } from "../db/schema.js";
@@ -199,8 +199,63 @@ export async function familyRoutes(app: FastifyInstance) {
   // the filter comes from the caller's own JWT, not a query param.
   app.get("/families/me/profiles", { preHandler: requireFamilyOwner }, async (request, reply) => {
     const identity = request.identity as { kind: "family_owner"; familyId: string };
-    const rows = await db.select().from(profiles).where(eq(profiles.familyId, identity.familyId));
+    const rows = await db
+      .select()
+      .from(profiles)
+      .where(and(eq(profiles.familyId, identity.familyId), eq(profiles.isOwnerProfile, false)));
     return reply.send({ profiles: rows.map(publicProfile) });
+  });
+
+  // Certification Prep (18 September 2026): find-or-create the one
+  // profile that represents the family owner's own study progress, so it
+  // can reuse the exact same quiz/scoring engine a child profile uses.
+  // Idempotent - safe to call every time the owner opens the feature.
+  app.post("/families/me/study-profile", { preHandler: requireFamilyOwner }, async (request, reply) => {
+    const identity = request.identity as { kind: "family_owner"; familyId: string; email: string };
+
+    const [existing] = await db
+      .select()
+      .from(profiles)
+      .where(and(eq(profiles.familyId, identity.familyId), eq(profiles.isOwnerProfile, true)))
+      .limit(1);
+    if (existing) {
+      return reply.send(publicProfile(existing));
+    }
+
+    const [created] = await db
+      .insert(profiles)
+      .values({
+        name: identity.email.split("@")[0] ?? "Your study profile",
+        familyId: identity.familyId,
+        isOwnerProfile: true,
+      })
+      .returning();
+    return reply.status(201).send(publicProfile(created));
+  });
+
+  // Mints a profile-session token for the owner's own study profile,
+  // without a PIN - the caller is already authenticated as the family
+  // owner, and the study profile only ever belongs to them, so a second
+  // credential here would just be friction. Same token shape as
+  // profiles.ts's verify-pin, so the frontend's existing profile-session
+  // handling (Quiz.tsx and everything downstream) works unmodified.
+  app.post("/families/me/study-profile/session", { preHandler: requireFamilyOwner }, async (request, reply) => {
+    const identity = request.identity as { kind: "family_owner"; familyId: string };
+
+    const [studyProfile] = await db
+      .select()
+      .from(profiles)
+      .where(and(eq(profiles.familyId, identity.familyId), eq(profiles.isOwnerProfile, true)))
+      .limit(1);
+    if (!studyProfile) {
+      return reply.status(404).send({ error: "No study profile yet - call POST /families/me/study-profile first." });
+    }
+
+    const token = await app.jwt.sign(
+      { kind: "profile", profileId: studyProfile.id, name: studyProfile.name },
+      { expiresIn: "90d" }
+    );
+    return reply.send({ profile: publicProfile(studyProfile), token });
   });
 
   // Adds a new child profile to the caller's own family. Returns the

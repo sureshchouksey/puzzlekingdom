@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Briefcase, GraduationCap, Heart, Landmark, LogOut, Plus, Target, Users } from "lucide-react";
+import { ArrowLeft, Briefcase, GraduationCap, Heart, Landmark, LogOut, Plus, Settings, Target, Users } from "lucide-react";
 import {
   addFamilyProfile,
   bootstrapChildPin,
@@ -149,37 +149,104 @@ function FeatureToggleRow({
   );
 }
 
-// One child's "Time in the Kingdom" card - total time, a couple of
-// highlights, and a tiny daily-trend bar chart (no charting dependency,
+// One tile on the landing hub (19 September 2026 redesign) - a single
+// main feature of the app, e.g. "Children Dashboard" or "Certification
+// Prep". Written as a small reusable component (rather than one-off
+// markup per feature) so adding a future feature - e.g. a SmartClassify
+// job-matching entry point - is just another <HomeTile /> in the grid.
+function HomeTile({
+  icon: Icon,
+  label,
+  description,
+  onClick,
+  comingSoon,
+}: {
+  icon: typeof Users;
+  label: string;
+  description: string;
+  onClick?: () => void;
+  comingSoon?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className={`flex flex-col items-start gap-3 rounded-2xl border border-border bg-card p-6 text-left transition-colors ${
+        onClick ? "hover:border-primary/60" : "cursor-default opacity-60"
+      }`}
+    >
+      <span className="grid size-12 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+        <Icon className="size-6" />
+      </span>
+      <div>
+        <p className="flex items-center gap-2 font-semibold">
+          {label}
+          {comingSoon && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold tracking-wide text-muted-foreground uppercase">
+              Coming soon
+            </span>
+          )}
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      </div>
+    </button>
+  );
+}
+
+// A single stat tile - the small building block the child dashboard's
+// top row is made of (redesigned 19 September 2026 from one wide
+// stacked-text card into a proper stat-tile row, per the "declutter the
+// family dashboard" request - a dashboard should read in a glance, not
+// as a paragraph).
+function StatTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <p className="text-[11px] font-bold tracking-wide text-muted-foreground uppercase">{label}</p>
+      <p className="font-display mt-1 text-2xl font-extrabold text-primary">{value}</p>
+    </div>
+  );
+}
+
+// One child's activity dashboard: a row of stat tiles (time, active
+// days, top topic, top game - only the ones with real data show up) plus
+// a small "Daily activity" trend card underneath (no charting dependency,
 // matching the app's current zero-chart-library baseline - each bar is
-// just a div sized relative to that child's own busiest day). Used both
-// in the family-wide grid and (slightly differently) atop the single-
-// child detail view below.
-function ChildActivityCard({ child }: { child: ChildActivitySummary }) {
+// just a div sized relative to that child's own busiest day in the
+// selected period). Only used inside ChildDetailView now - the family
+// list's own per-card mini version was removed in the same redesign to
+// keep the landing grid calm.
+function ChildActivityStats({ child }: { child: ChildActivitySummary }) {
   const maxSeconds = Math.max(1, ...child.dailyTrend.map((d) => d.seconds));
   const topGameLabel = child.topGame ? GAME_META[child.topGame as GameKey]?.title ?? child.topGame : null;
 
+  const tiles: { label: string; value: string }[] = [
+    { label: "Time in the Kingdom", value: formatDuration(child.totalSeconds) },
+    { label: "Active days", value: `${child.activeDays}` },
+  ];
+  if (child.topTopic) tiles.push({ label: "Top topic", value: child.topTopic });
+  if (topGameLabel) tiles.push({ label: "Favorite game", value: topGameLabel });
+
   return (
-    <div className="flex flex-wrap items-center justify-between gap-6 rounded-2xl border border-border bg-card p-6">
-      <div>
-        <p className="text-[11px] font-bold tracking-wide text-muted-foreground uppercase">Time in the Kingdom</p>
-        <p className="font-display text-3xl font-extrabold text-primary">{formatDuration(child.totalSeconds)}</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Active {child.activeDays} {child.activeDays === 1 ? "day" : "days"}
-          {child.topTopic && ` · Mostly ${child.topTopic}`}
-          {topGameLabel && ` · Loves ${topGameLabel}`}
-        </p>
+    <div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {tiles.map((t) => (
+          <StatTile key={t.label} label={t.label} value={t.value} />
+        ))}
       </div>
       {child.dailyTrend.length > 0 && (
-        <div className="flex h-12 items-end gap-1.5">
-          {child.dailyTrend.map((d) => (
-            <div
-              key={d.date}
-              title={`${d.date}: ${formatDuration(d.seconds)}`}
-              className={`min-h-1 w-2.5 rounded-t bg-primary ${d.seconds === maxSeconds ? "" : "opacity-40"}`}
-              style={{ height: `${Math.max(10, (d.seconds / maxSeconds) * 100)}%` }}
-            />
-          ))}
+        <div className="mt-3 rounded-2xl border border-border bg-card p-4">
+          <p className="text-[11px] font-bold tracking-wide text-muted-foreground uppercase">Daily activity</p>
+          <div className="mt-3 flex h-14 items-end gap-1.5">
+            {child.dailyTrend.map((d) => (
+              <div
+                key={d.date}
+                title={`${d.date}: ${formatDuration(d.seconds)}`}
+                className={`min-h-1 flex-1 rounded-t bg-primary ${d.seconds === maxSeconds ? "" : "opacity-40"}`}
+                style={{ height: `${Math.max(10, (d.seconds / maxSeconds) * 100)}%` }}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -198,12 +265,18 @@ function ChildActivityCard({ child }: { child: ChildActivitySummary }) {
 function ChildDetailView({
   profile,
   activity,
+  metricsError,
   educationEnabled,
+  period,
+  onPeriodChange,
   onBack,
 }: {
   profile: Profile;
   activity: ChildActivitySummary | undefined;
+  metricsError: string | null;
   educationEnabled: boolean;
+  period: MetricsPeriod;
+  onPeriodChange: (period: MetricsPeriod) => void;
   onBack: () => void;
 }) {
   const [topicReports, setTopicReports] = useState<TopicReport[] | null>(null);
@@ -229,11 +302,22 @@ function ChildDetailView({
 
   return (
     <div className="mt-8">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="rounded-full" onClick={onBack} aria-label="Back">
-          <ArrowLeft className="size-5" />
-        </Button>
-        <h2 className="text-xl font-semibold">{profile.name}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" className="rounded-full" onClick={onBack} aria-label="Back">
+            <ArrowLeft className="size-5" />
+          </Button>
+          <h2 className="text-xl font-semibold">{profile.name}</h2>
+        </div>
+        {educationEnabled && (
+          <div className="flex gap-2">
+            {(Object.keys(PERIOD_LABELS) as MetricsPeriod[]).map((p) => (
+              <Button key={p} size="sm" variant={period === p ? "default" : "secondary"} onClick={() => onPeriodChange(p)}>
+                {PERIOD_LABELS[p]}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
 
       {!educationEnabled && (
@@ -246,10 +330,11 @@ function ChildDetailView({
       {educationEnabled && (
         <>
           {error && <p className="mt-4 text-sm font-medium text-destructive">{error}</p>}
+          {metricsError && <p className="mt-4 text-sm font-medium text-destructive">{metricsError}</p>}
 
           {activity && (
             <div className="mt-4">
-              <ChildActivityCard child={activity} />
+              <ChildActivityStats child={activity} />
             </div>
           )}
 
@@ -366,23 +451,38 @@ function ChildDetailView({
 // independently of this screen: from the app's own Welcome screen, by
 // typing their name and PIN themselves.
 type Step =
+  // Landing hub (19 September 2026 redesign, per direct user correction
+  // - "Landing page should add all main feature of the application
+  // only"): the actual root/landing view is a tile grid of the app's
+  // main features - Children Dashboard and Certification Prep today,
+  // with room for more later (e.g. a future SmartClassify entry point)
+  // - rather than the children grid itself. Every other step's "back"
+  // chain eventually leads back here.
+  | { kind: "home" }
   | { kind: "list" }
   | { kind: "addChildInfo" }
   | { kind: "addChildAvatar"; nickname: string; yearGroup: string }
   // Brand-new child, hasPin always false - reuses the existing
   // setProfilePin bootstrap, same as Welcome.tsx's newTitle -> setPin step.
   | { kind: "addChildPin"; profile: Profile }
-  | { kind: "childDetail"; profile: Profile };
+  | { kind: "childDetail"; profile: Profile }
+  // Family features only (19 September 2026: Certification prep was
+  // promoted to a home-page tile instead, per direct user instruction -
+  // "toggle option should be in settings only") - reached via the
+  // header's gear icon.
+  | { kind: "settings" };
 
 export function FamilyDashboard({
   owner,
+  onOpenCertPrep,
   onLogOut,
 }: {
   owner: FamilyOwner;
+  onOpenCertPrep: () => void;
   onLogOut: () => void;
 }) {
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
-  const [step, setStep] = useState<Step>({ kind: "list" });
+  const [step, setStep] = useState<Step>({ kind: "home" });
   const [period, setPeriod] = useState<MetricsPeriod>("week");
   const [metrics, setMetrics] = useState<FamilyMetricsSummary | null>(null);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -448,6 +548,12 @@ export function FamilyDashboard({
     getFamilyProfiles()
       .then(setProfiles)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load your children"));
+  }
+
+  // Back to the landing hub - used by Settings' own back arrow, since
+  // Settings is reached from home now, not from the children list.
+  function goHome() {
+    setStep({ kind: "home" });
   }
 
   function resetForm() {
@@ -539,51 +645,71 @@ export function FamilyDashboard({
               <p className="text-sm text-muted-foreground">{owner.email}</p>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              logout();
-              onLogOut();
-            }}
-            className="gap-2"
-          >
-            <LogOut className="size-4" />
-            Log out
-          </Button>
+          <div className="flex items-center gap-2">
+            {step.kind === "home" && (
+              <Button variant="ghost" size="icon" className="rounded-full" onClick={() => setStep({ kind: "settings" })} aria-label="Settings">
+                <Settings className="size-5" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              onClick={() => {
+                logout();
+                onLogOut();
+              }}
+              className="gap-2"
+            >
+              <LogOut className="size-4" />
+              Log out
+            </Button>
+          </div>
         </header>
 
         {error && step.kind === "list" && <p className="mt-4 text-sm font-medium text-destructive">{error}</p>}
 
-        {step.kind === "list" && (
+        {step.kind === "home" && (
           <section className="mt-8">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">Your children</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Tap a child to see their reports and time in the Kingdom.</p>
-              </div>
-              {(features === null || features.childEducationEnabled) && (
-                <div className="flex gap-2">
-                  {(Object.keys(PERIOD_LABELS) as MetricsPeriod[]).map((p) => (
-                    <Button key={p} size="sm" variant={period === p ? "default" : "secondary"} onClick={() => setPeriod(p)}>
-                      {PERIOD_LABELS[p]}
-                    </Button>
-                  ))}
-                </div>
-              )}
+            <div>
+              <h2 className="text-lg font-semibold">Welcome back</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Everything for your family, in one place.</p>
             </div>
 
-            {metricsError && (features === null || features.childEducationEnabled) && (
-              <p className="mt-3 text-sm font-medium text-destructive">{metricsError}</p>
-            )}
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <HomeTile
+                icon={Users}
+                label="Children Dashboard"
+                description="See each child's profile, progress and activity time."
+                onClick={() => setStep({ kind: "list" })}
+              />
+              <HomeTile
+                icon={GraduationCap}
+                label="Certification Prep"
+                description="Study for the Claude Certified Architect - Professional exam with a quiz and flashcards."
+                onClick={onOpenCertPrep}
+              />
+              {/* Future feature entry points land here as another HomeTile
+                  - e.g. a SmartClassify job-matching tile. */}
+            </div>
+          </section>
+        )}
+
+        {step.kind === "list" && (
+          <section className="mt-8">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="icon" className="rounded-full" onClick={goHome} aria-label="Back">
+                <ArrowLeft className="size-5" />
+              </Button>
+              <div>
+                <h2 className="text-lg font-semibold">Your children</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Tap a child to open their dashboard.</p>
+              </div>
+            </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               {profiles === null && <p className="text-sm text-muted-foreground">Loading...</p>}
               {profiles?.map((p, i) => {
                 const file = avatarFile(p.avatarId);
                 const accent = CHILD_ACCENTS[i % CHILD_ACCENTS.length];
-                const showActivity = features === null || features.childEducationEnabled;
-                const activity = metrics?.children.find((c) => c.profileId === p.id);
-                const maxSeconds = activity ? Math.max(1, ...activity.dailyTrend.map((d) => d.seconds)) : 1;
                 return (
                   <button
                     key={p.id}
@@ -611,34 +737,10 @@ export function FamilyDashboard({
                       <div>
                         <p className="font-semibold">{p.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {[p.title, p.yearGroup].filter(Boolean).join(" · ") || "Tap to see their progress"}
+                          {[p.title, p.yearGroup].filter(Boolean).join(" · ") || "Tap to open their dashboard"}
                         </p>
                       </div>
                     </div>
-                    {showActivity && (
-                      <div className="flex items-center justify-between gap-3 border-t border-border pt-3.5">
-                        <div>
-                          <p className="text-[11px] font-bold tracking-wide text-muted-foreground uppercase">
-                            {PERIOD_LABELS[period]}
-                          </p>
-                          <p className={`font-display text-xl font-extrabold ${accent.text}`}>
-                            {activity ? formatDuration(activity.totalSeconds) : metrics ? "0m" : "..."}
-                          </p>
-                        </div>
-                        {activity && activity.dailyTrend.length > 0 && (
-                          <div className="flex h-8 items-end gap-[3px]">
-                            {activity.dailyTrend.map((d) => (
-                              <div
-                                key={d.date}
-                                title={`${d.date}: ${formatDuration(d.seconds)}`}
-                                className={`min-h-1 w-1.5 rounded-t ${accent.bg} ${d.seconds === maxSeconds ? "" : "opacity-40"}`}
-                                style={{ height: `${Math.max(10, (d.seconds / maxSeconds) * 100)}%` }}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </button>
                 );
               })}
@@ -659,37 +761,49 @@ export function FamilyDashboard({
           </section>
         )}
 
-        {step.kind === "list" && (
-          <section className="mt-10">
-            <h2 className="text-lg font-semibold">Family features</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Turn on the features your family wants to use. Child Education is ready today - the rest are coming soon.
-            </p>
+        {step.kind === "settings" && (
+          <div className="mt-8">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="icon" className="rounded-full" onClick={goHome} aria-label="Back">
+                <ArrowLeft className="size-5" />
+              </Button>
+              <h2 className="text-xl font-semibold">Settings</h2>
+            </div>
 
-            {featuresError && <p className="mt-3 text-sm font-medium text-destructive">{featuresError}</p>}
-            {!features && !featuresError && <p className="mt-3 text-sm text-muted-foreground">Loading...</p>}
+            <section className="mt-6">
+              <h3 className="text-lg font-semibold">Family features</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Turn on the features your family wants to use. Child Education is ready today - the rest are coming soon.
+              </p>
 
-            {features && (
-              <div className="mt-4 flex flex-col gap-3">
-                {(Object.keys(FEATURE_META) as (keyof FamilyFeatureFlags)[]).map((key) => (
-                  <FeatureToggleRow
-                    key={key}
-                    flagKey={key}
-                    checked={features[key]}
-                    disabled={savingFeature === key}
-                    onChange={(next) => toggleFeature(key, next)}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
+              {featuresError && <p className="mt-3 text-sm font-medium text-destructive">{featuresError}</p>}
+              {!features && !featuresError && <p className="mt-3 text-sm text-muted-foreground">Loading...</p>}
+
+              {features && (
+                <div className="mt-4 flex flex-col gap-3">
+                  {(Object.keys(FEATURE_META) as (keyof FamilyFeatureFlags)[]).map((key) => (
+                    <FeatureToggleRow
+                      key={key}
+                      flagKey={key}
+                      checked={features[key]}
+                      disabled={savingFeature === key}
+                      onChange={(next) => toggleFeature(key, next)}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
         )}
 
         {step.kind === "childDetail" && (
           <ChildDetailView
             profile={step.profile}
             activity={metrics?.children.find((c) => c.profileId === step.profile.id)}
+            metricsError={metricsError}
             educationEnabled={features === null || features.childEducationEnabled}
+            period={period}
+            onPeriodChange={setPeriod}
             onBack={resetForm}
           />
         )}

@@ -61,9 +61,16 @@ function shuffled<T>(items: T[]): T[] {
 export function assemblyAnswerPayload(
   questionType: string,
   answerPayload: Record<string, unknown> | null
-): { left: unknown; right: unknown } | null {
+): { left: unknown; right: unknown } | { items: unknown; buckets: unknown } | null {
   if (questionType === "match_column" && answerPayload) {
     return { left: answerPayload.left, right: answerPayload.right };
+  }
+  // categorize needs the items to sort and the bucket labels up front,
+  // same "give the child the board, withhold only the answer key"
+  // reasoning as match_column just above - correctBucketIndex is the
+  // part that's withheld.
+  if (questionType === "categorize" && answerPayload) {
+    return { items: answerPayload.items, buckets: answerPayload.buckets };
   }
   return null;
 }

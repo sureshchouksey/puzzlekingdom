@@ -21,6 +21,7 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   match_column: "Match the column",
   short_answer: "Short answer",
   long_answer: "Long answer",
+  categorize: "Categorize",
 };
 
 export const QUESTION_TYPE_ORDER: QuestionType[] = [
@@ -32,6 +33,7 @@ export const QUESTION_TYPE_ORDER: QuestionType[] = [
   "match_column",
   "short_answer",
   "long_answer",
+  "categorize",
 ];
 
 export const OPTION_LABELS = ["a", "b", "c", "d", "e", "f"] as const;
@@ -136,6 +138,33 @@ export function draftToWriteInput(d: QuestionDraft, documentId?: string): AdminQ
       const rubricKeyPoints = d.rubricKeyPoints.map((r) => r.trim()).filter(Boolean);
       return { ...base, options: [], correctOptionId: "", answerPayload: { rubricKeyPoints } };
     }
+    case "categorize": {
+      // Reuses the same {left, right} pairs editor as match_column - here
+      // "left" is the item text and "right" is which bucket it belongs
+      // in. Buckets are derived by deduplicating the right-hand values
+      // (first-occurrence order), since several rows are expected to
+      // share the same bucket text (unlike match_column, where every
+      // right value is normally unique).
+      const rows = d.pairs.map((p) => ({ left: p.left.trim(), right: p.right.trim() })).filter((p) => p.left && p.right);
+      const buckets: string[] = [];
+      const bucketIndexOf = new Map<string, number>();
+      for (const row of rows) {
+        if (!bucketIndexOf.has(row.right)) {
+          bucketIndexOf.set(row.right, buckets.length);
+          buckets.push(row.right);
+        }
+      }
+      return {
+        ...base,
+        options: [],
+        correctOptionId: "",
+        answerPayload: {
+          items: rows.map((r) => r.left),
+          buckets,
+          correctBucketIndex: rows.map((r) => bucketIndexOf.get(r.right)!),
+        },
+      };
+    }
   }
 }
 
@@ -155,6 +184,11 @@ export function draftIsValid(d: QuestionDraft): boolean {
     case "short_answer":
     case "long_answer":
       return d.rubricKeyPoints.some((r) => r.trim().length > 0);
+    case "categorize": {
+      const rows = d.pairs.filter((p) => p.left.trim().length > 0 && p.right.trim().length > 0);
+      const distinctBuckets = new Set(rows.map((p) => p.right.trim()));
+      return rows.length >= 2 && distinctBuckets.size >= 2;
+    }
   }
 }
 
@@ -366,6 +400,56 @@ export function QuestionTypeFields({ draft, onChange }: { draft: QuestionDraft; 
               className="self-start text-sm font-semibold text-primary hover:underline"
             >
               + Add pair
+            </button>
+          </div>
+        </div>
+      )}
+
+      {draft.questionType === "categorize" && (
+        <div className="mb-2.5">
+          <p className="mb-1.5 text-sm text-muted-foreground">
+            Items to sort and the bucket each one belongs in (at least 2 items, at least 2 distinct buckets - it's fine, expected even, for
+            several rows to share the same bucket text)
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {draft.pairs.map((pair, pi) => (
+              <div key={pi} className="flex items-center gap-2">
+                <input
+                  value={pair.left}
+                  onChange={(e) => {
+                    const pairs = [...draft.pairs];
+                    pairs[pi] = { ...pairs[pi], left: e.target.value };
+                    onChange({ ...draft, pairs });
+                  }}
+                  placeholder="Item"
+                  className={`${inputClass} flex-1`}
+                />
+                <span className="text-muted-foreground">&rarr;</span>
+                <input
+                  value={pair.right}
+                  onChange={(e) => {
+                    const pairs = [...draft.pairs];
+                    pairs[pi] = { ...pairs[pi], right: e.target.value };
+                    onChange({ ...draft, pairs });
+                  }}
+                  placeholder="Bucket (e.g. Claude / Existing System / Human)"
+                  className={`${inputClass} flex-1`}
+                />
+                {draft.pairs.length > 2 && (
+                  <button
+                    onClick={() => onChange({ ...draft, pairs: draft.pairs.filter((_, i) => i !== pi) })}
+                    className="text-sm font-medium text-destructive hover:underline"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              onClick={() => onChange({ ...draft, pairs: [...draft.pairs, { left: "", right: "" }] })}
+              className="self-start text-sm font-semibold text-primary hover:underline"
+            >
+              + Add item
             </button>
           </div>
         </div>

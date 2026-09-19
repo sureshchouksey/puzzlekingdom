@@ -21,6 +21,7 @@ export const questionType = pgEnum("question_type", [
   "match_column",
   "short_answer",
   "long_answer",
+  "categorize",
 ]);
 
 export const topicDifficulty = pgEnum("topic_difficulty", ["beginner", "medium", "hard"]);
@@ -37,6 +38,20 @@ export const classes = pgTable("classes", {
 export const subjects = pgTable("subjects", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull().unique(),
+});
+
+// Simple front/back study cards, subject-scoped (and optionally
+// topic-tagged) - built for Certification Prep (18 September 2026,
+// Claude Certified Architect - Professional) but generic to any subject.
+// Deliberately separate from `questions` rather than forcing a flip-card
+// interaction into the MCQ-shaped scoring engine.
+export const flashcards = pgTable("flashcards", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  subjectId: uuid("subject_id").notNull().references(() => subjects.id),
+  topic: text("topic"),
+  front: text("front").notNull(),
+  back: text("back").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // A real, ordered topic within one class+subject - replaces inventing
@@ -89,6 +104,12 @@ export const profiles = pgTable("profiles", {
   // data-minimization decision to use nickname + year group instead of a
   // real name for new sign-ups. Null for every pre-existing profile.
   yearGroup: text("year_group"),
+  // True only for the one profile auto-created for a family owner's own
+  // use (Certification Prep, 18 September 2026 - see
+  // families.ts's ensureStudyProfile) - lets that profile reuse the exact
+  // same quiz/scoring engine a child profile uses, while staying excluded
+  // from GET /families/me/profiles' children grid.
+  isOwnerProfile: boolean("is_owner_profile").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -310,6 +331,7 @@ export const classesRelations = relations(classes, ({ many }) => ({
 export const subjectsRelations = relations(subjects, ({ many }) => ({
   documents: many(documents),
   questions: many(questions),
+  flashcards: many(flashcards),
   attempts: many(quizAttempts),
   conceptGuides: many(conceptGuides),
   topics: many(topics),

@@ -1,0 +1,23 @@
+-- New "categorize" question type: sort several items into a small,
+-- shared set of named buckets (e.g. Claude Certified Architect -
+-- Professional's Claude / Existing System / Human decomposition
+-- framework - see plan/Question-Types-and-Content-Authoring-Plan.md).
+--
+-- Genuinely different from match_column, which is a 1:1 pairing between
+-- two EQUAL-length lists - Quiz.tsx's existing tap-to-pair UI marks a
+-- right-column item "used" the moment one left item claims it, so it
+-- cannot represent "several items share one bucket." categorize gets its
+-- own type (and its own board UI) instead of stretching match_column's
+-- meaning.
+--
+-- answerPayload shape: { items: string[], buckets: string[],
+-- correctBucketIndex: number[] } - one bucket index per item; buckets is
+-- typically much shorter than items (e.g. 3 buckets, 6-8 items).
+--
+-- IMPORTANT: Postgres will not let a statement in the SAME transaction
+-- block both add this enum value and use it. Run this ALTER TYPE
+-- statement by itself first, in its own execution in the Supabase SQL
+-- Editor; only after it has committed, run seed:typed-questions (or any
+-- other statement that inserts/reads a 'categorize' row) as a separate,
+-- later step.
+alter type question_type add value if not exists 'categorize';

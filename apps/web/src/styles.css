@@ -216,3 +216,38 @@
 @utility animate-pop-in {
   animation: pop-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
 }
+
+/*
+ * Flashcards' 3D flip (18 September 2026) - a real perspective flip rather
+ * than swapping text in place. .flip-card sets the viewing perspective;
+ * .flip-card-inner holds both faces and rotates as a unit; each
+ * .flip-card-face is hidden when facing away (backface-visibility) and
+ * .flip-card-face-back is pre-rotated 180deg so it's right-side-up once
+ * the inner element has turned to reveal it. Both faces are stacked in
+ * the same grid cell so the container's height is just the taller face's,
+ * not their sum.
+ */
+.flip-card {
+  perspective: 1600px;
+}
+
+.flip-card-inner {
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0.15, 0.2, 1);
+}
+
+.flip-card-inner.is-flipped {
+  transform: rotateY(180deg);
+}
+
+.flip-card-face {
+  grid-area: 1 / 1;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.flip-card-face-back {
+  transform: rotateY(180deg);
+}
+

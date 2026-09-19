@@ -40,6 +40,7 @@ function capitalize(value: string) {
 export function Welcome({
   onEnter,
   onParentDashboard,
+  onOpenLegal,
 }: {
   onEnter: (profile: Profile) => void;
   // Single grown-up entry point (10 September 2026): family-owner login
@@ -50,6 +51,10 @@ export function Welcome({
   // name" flow, which still works unchanged for every profile not yet
   // claimed by a family.
   onParentDashboard: () => void;
+  // Privacy Policy / Terms of Service (19 September 2026 legal audit) -
+  // opens Legal.tsx via App.tsx's screen state. Same content is also
+  // reachable pre-passcode from Gate.tsx directly.
+  onOpenLegal: (tab: "privacy" | "terms") => void;
 }) {
   const [step, setStep] = useState<Step>({ kind: "name" });
   const [name, setName] = useState("");
@@ -301,7 +306,7 @@ export function Welcome({
           {error && <p className="mt-4 text-sm font-medium text-destructive">{error}</p>}
         </section>
 
-        <footer className="mt-auto flex flex-wrap items-center justify-center gap-6 pt-12 text-center">
+        <footer className="mt-auto flex flex-col items-center gap-3 pt-12 text-center">
           <button
             onClick={onParentDashboard}
             className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground/70 transition-colors hover:text-primary"
@@ -309,6 +314,20 @@ export function Welcome({
             <ShieldHalf className="size-3.5" />
             Parent dashboard
           </button>
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground/60">
+            <button onClick={() => onOpenLegal("privacy")} className="transition-colors hover:text-primary">
+              Privacy Policy
+            </button>
+            <span aria-hidden="true">&middot;</span>
+            <button onClick={() => onOpenLegal("terms")} className="transition-colors hover:text-primary">
+              Terms of Service
+            </button>
+            <span aria-hidden="true">&middot;</span>
+            <span>&copy; {new Date().getFullYear()} Puzzle Kingdom</span>
+          </div>
+          <p className="max-w-sm text-[10px] text-muted-foreground/50">
+            Not affiliated with, endorsed by, or sponsored by Anthropic. "Claude" is a trademark of Anthropic, PBC.
+          </p>
         </footer>
       </div>
     </main>

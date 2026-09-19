@@ -44,6 +44,18 @@ docs/official-papers/
 docs/Year3 content/
 docs/Year 4 Content/
 
+# Certification Prep source content (quiz questions + flashcards).
+# Most of this is originally-authored, grounded in Anthropic's genuinely
+# public course documentation - kept local-only by the same convention as
+# the other docs/ content folders above, not because of a copyright
+# problem. One exception found during the 19-20 September 2026
+# legal/copyright audit: two files here WERE derived from gated/paywalled
+# course content, not public docs - those were archived into this
+# folder's own _flagged-paywalled-content/ subfolder with a README, and
+# the corresponding database rows were removed from production. See
+# plan/Legal-and-Copyright-Production-Audit.md for the full history.
+docs/Professional Certifications/
+
 # Original unlicensed/unknown-provenance avatar images, archived (not
 # deleted) during the 19-20 September 2026 legal/copyright audit - see
 # plan/Legal-and-Copyright-Production-Audit.md. Kept locally only so they

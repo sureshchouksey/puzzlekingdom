@@ -148,6 +148,7 @@ type Mode = "quest" | "practice" | "games";
 export function SubjectPicker({
   pkClass,
   profile,
+  initialSubject,
   onBack,
   onQuizReady,
   onGoHome,
@@ -157,6 +158,13 @@ export function SubjectPicker({
 }: {
   pkClass: PkClass;
   profile: Profile;
+  // Set only by Certification Prep (19 September 2026 flow rework) - the
+  // certification was already chosen back on CertPrepHub, so this skips
+  // straight past the "subject" step below and lands directly on "mode"
+  // (Quest / Topic Practice / Arcade). Undefined for every kid-facing
+  // caller (ClassPicker -> SubjectPicker), which still picks a subject
+  // here as it always has.
+  initialSubject?: string;
   onBack: () => void;
   // journey is only set for a Quest Journey quiz - Results.tsx uses it to
   // offer "next quest" and jump straight into the next topic.
@@ -171,7 +179,7 @@ export function SubjectPicker({
   onViewReports: () => void;
 }) {
   const [subjects, setSubjects] = useState<Subject[] | null>(null);
-  const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
+  const [selectedSubject, setSelectedSubject] = useState<string | null>(initialSubject ?? null);
   const [mode, setMode] = useState<Mode | null>(null);
 
   // Activity time tracking (11 September 2026) - see
@@ -211,6 +219,16 @@ export function SubjectPicker({
       word_meaning_match: true,
       homophone_hunter: true,
       prefix_suffix_builder: true,
+      decompose_the_workflow: true,
+      platform_map_primitives: true,
+      pattern_selection: true,
+      reference_architectures: true,
+      rag_pipeline_design: true,
+      model_context_strategy: true,
+      prompting_as_architecture: true,
+      entry_points_governance: true,
+      assembly_recap: true,
+      all_sections_mix: true,
     },
   });
   useEffect(() => {
@@ -335,8 +353,14 @@ export function SubjectPicker({
 
   function goBack() {
     if (step === "quest" || step === "practice" || step === "games") setMode(null);
-    else if (step === "mode") setSelectedSubject(null);
-    else onBack();
+    else if (step === "mode") {
+      // initialSubject means there was never a real "subject" step to
+      // fall back into here - it was chosen upstream on CertPrepHub, so
+      // backing out of "mode" leaves SubjectPicker entirely instead of
+      // re-showing a one-item subject list.
+      if (initialSubject) onBack();
+      else setSelectedSubject(null);
+    } else onBack();
   }
 
   const subjectIndex = subjects?.findIndex((s) => s.name === selectedSubject) ?? 0;
