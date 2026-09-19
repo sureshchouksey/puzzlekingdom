@@ -43,3 +43,9 @@ docs/official-papers/
 # (Supabase), so the deployed app works fine without these files present.
 docs/Year3 content/
 docs/Year 4 Content/
+
+# Original unlicensed/unknown-provenance avatar images, archived (not
+# deleted) during the 19-20 September 2026 legal/copyright audit - see
+# plan/Legal-and-Copyright-Production-Audit.md. Kept locally only so they
+# can be reviewed before permanent deletion; must never be committed.
+apps/web/public/_removed-unlicensed-assets/

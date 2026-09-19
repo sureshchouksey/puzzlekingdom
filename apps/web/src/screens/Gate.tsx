@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { checkPasscode, getStoredPasscode, PASSCODE_STORAGE_KEY } from "../api";
 import { Button } from "../components/ui/button";
+import { PrivacyPolicyContent, TermsOfServiceContent } from "../components/LegalContent";
 
 // Gates the whole app behind one shared family passcode, for the public
 // deployment. Purely a "keep random internet visitors out" measure, not
@@ -30,6 +31,12 @@ export function Gate({ children }: { children: ReactNode }) {
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Privacy Policy / Terms of Service need to be readable before anyone
+  // types a passcode or any personal data (19 September 2026 legal audit)
+  // - so this is handled entirely within Gate, independent of the
+  // passcode-locked status above, rather than only being reachable from
+  // deep inside the app after unlocking.
+  const [legalTab, setLegalTab] = useState<"privacy" | "terms" | null>(null);
 
   useEffect(() => {
     checkPasscode()
@@ -65,6 +72,28 @@ export function Gate({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
+  if (legalTab) {
+    return (
+      <main className="night-sky relative min-h-screen overflow-hidden pb-16">
+        <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
+        <div className="relative mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-8">
+          <header className="flex items-center justify-between gap-4">
+            <Button variant="ghost" size="icon" className="rounded-full" onClick={() => setLegalTab(null)} aria-label="Back">
+              &larr;
+            </Button>
+            <h1 className="text-gold-shimmer text-2xl sm:text-3xl">
+              {legalTab === "privacy" ? "Privacy Policy" : "Terms of Service"}
+            </h1>
+            <span className="size-9" />
+          </header>
+          <section className="mx-auto mt-8 w-full rounded-3xl border border-border/70 bg-card/85 p-6 backdrop-blur shadow-quest sm:p-8">
+            {legalTab === "privacy" ? <PrivacyPolicyContent /> : <TermsOfServiceContent />}
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="night-sky relative flex min-h-screen items-center justify-center overflow-hidden px-6">
       <div className="starfield animate-twinkle pointer-events-none absolute inset-0" />
@@ -85,6 +114,16 @@ export function Gate({ children }: { children: ReactNode }) {
           </Button>
         </form>
         {error && <p className="mt-4 text-sm font-medium text-destructive">{error}</p>}
+
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground/60">
+          <button onClick={() => setLegalTab("privacy")} className="transition-colors hover:text-primary">
+            Privacy Policy
+          </button>
+          <span aria-hidden="true">&middot;</span>
+          <button onClick={() => setLegalTab("terms")} className="transition-colors hover:text-primary">
+            Terms of Service
+          </button>
+        </div>
       </div>
     </main>
   );
