@@ -322,7 +322,7 @@ export function SubjectPicker({
     }
   }
 
-  async function startPractice(topic?: string) {
+  async function startPractice(topic?: string, matchTopics?: string[]) {
     if (!selectedSubject) return;
     setLoading(true);
     setError(null);
@@ -334,6 +334,7 @@ export function SubjectPicker({
               subjectName: selectedSubject,
               classId: pkClass.id,
               topic,
+              topics: matchTopics,
               profileId: profile.id,
               stageSize: STAGE_SIZE,
             })
@@ -342,6 +343,7 @@ export function SubjectPicker({
             subjectName: selectedSubject,
             classId: pkClass.id,
             topic,
+            topics: matchTopics,
             profileId: profile.id,
             stageSize: STAGE_SIZE,
           });
@@ -371,10 +373,12 @@ export function SubjectPicker({
   const jewel: Jewel = selectedSubject ? subjectVisual(selectedSubject, subjectIndex).jewel : "gold";
 
   // Certification Prep certifications (any subject CERT_COURSE_INFO has
-  // an entry for) group their real DB topics into one quest node per
-  // course module instead of one per raw topic - see certCourseInfo.ts's
-  // own comment on CourseModule.topics for why. Every other subject
-  // keeps exactly today's one-node-per-topic behavior.
+  // an entry for) group their real DB topics into one item per course
+  // module instead of one per raw topic - see certCourseInfo.ts's own
+  // comment on CourseModule.topics for why. Every other subject keeps
+  // exactly today's one-item-per-topic behavior. Shared by both the
+  // Quest map (below) and Topic Practice's card list, so both surfaces
+  // stay in sync automatically.
   const courseInfo = selectedSubject ? CERT_COURSE_INFO[selectedSubject] : undefined;
   const questItems: QuestJourneyItem[] | null = courseInfo
     ? courseInfo.modules.map((mod) => ({ subjectName: selectedSubject!, topic: mod.name, matchTopics: mod.topics }))
@@ -753,9 +757,15 @@ export function SubjectPicker({
 
         {step === "practice" && (
           <section className="mx-auto mt-6 w-full max-w-2xl flex-1">
-            {topics === null && !error && <p className="mt-8 text-center text-muted-foreground">Loading topics...</p>}
+            {/* Same grouped list as Quest (questItems - one card per course
+                module for Certification Prep subjects, one per raw topic
+                for everyone else), so Topic Practice no longer shows the
+                10 granular sub-topics module 1 is made of as separate
+                cards. A grouped card's Start/Continue kicks off a combined
+                quiz across all of that module's underlying topics. */}
+            {questItems === null && !error && <p className="mt-8 text-center text-muted-foreground">Loading topics...</p>}
 
-            {topics && (
+            {questItems && (
               <div className="grid gap-3 sm:grid-cols-2">
                 <PracticeCard
                   icon={Shuffle}
@@ -766,21 +776,21 @@ export function SubjectPicker({
                   loading={loading}
                   onClick={() => startPractice(undefined)}
                 />
-                {topics.map((t) => (
+                {questItems.map((item) => (
                   <PracticeCard
-                    key={t}
+                    key={item.topic}
                     icon={ListChecks}
                     jewel={jewel}
-                    title={t}
-                    inProgress={inProgressFor(t)}
+                    title={item.topic}
+                    inProgress={inProgressFor(item.topic)}
                     loading={loading}
-                    onClick={() => startPractice(t)}
+                    onClick={() => startPractice(item.topic, item.matchTopics)}
                   />
                 ))}
               </div>
             )}
 
-            {topics && topics.length === 0 && (
+            {questItems && questItems.length === 0 && (
               <p className="mt-4 text-center text-sm text-muted-foreground">
                 No topics tagged yet for {selectedSubject} - mixed practice covers every question saved for this
                 subject.
