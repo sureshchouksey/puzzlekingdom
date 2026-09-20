@@ -92,11 +92,27 @@ export async function quizRoutes(app: FastifyInstance) {
   // size, this naturally produces many stages (e.g. 200 questions at 10
   // per stage = 20 stages) rather than just one or two.
   app.post<{
-    Body: { subjectName?: string; classId?: string; topic?: string; count?: number; profileId?: string; stageSize?: number };
+    Body: {
+      subjectName?: string;
+      classId?: string;
+      topic?: string;
+      // Grouped-node filter (20 September 2026, Certification Prep's
+      // Quest map): when a quest node represents several real DB topics
+      // at once (e.g. a whole course module), `topics` is the actual set
+      // to pull questions from, while `topic` (singular, below) keeps
+      // being the one label stored on the attempt for resume/in-progress
+      // matching. Every other caller only ever sends `topic` and leaves
+      // this undefined, so the single-topic path is unchanged.
+      topics?: string[];
+      count?: number;
+      profileId?: string;
+      stageSize?: number;
+    };
   }>("/quizzes", async (request, reply) => {
     const subjectName = request.body?.subjectName;
     const classId = request.body?.classId;
     const topic = request.body?.topic;
+    const topicsFilter = request.body?.topics?.filter((t) => t.trim().length > 0);
     const profileId = request.body?.profileId;
     // No default cap - omitting `count` pulls in every matching question.
     const count = request.body?.count;
@@ -108,9 +124,21 @@ export async function quizRoutes(app: FastifyInstance) {
 
     const conditions = [eq(questions.subjectId, subject.id)];
     if (classId) conditions.push(eq(documents.classId, classId));
-    // topics is a text[] tag array - a question matches if the requested
-    // topic is one of (possibly several) tags on it.
-    if (topic) conditions.push(sql`${questions.topics} @> ARRAY[${topic}]::text[]`);
+    // topics is a text[] tag array. `topicsFilter` (several possible
+    // tags, OR'd together via the array-overlap operator) takes priority
+    // over the single-`topic` containment check when both are present -
+    // it's only ever sent alongside `topic`, never instead of it, so
+    // this doesn't change behavior for any caller that only sends `topic`.
+    if (topicsFilter && topicsFilter.length > 0) {
+      conditions.push(
+        sql`${questions.topics} && ARRAY[${sql.join(
+          topicsFilter.map((t) => sql`${t}`),
+          sql`, `
+        )}]::text[]`
+      );
+    } else if (topic) {
+      conditions.push(sql`${questions.topics} @> ARRAY[${topic}]::text[]`);
+    }
 
     // Joined with documents so each question can carry its source
     // document's id, class, and (if any) shared reading passage -

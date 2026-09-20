@@ -220,6 +220,12 @@ export function assembleQuiz(params: {
   subjectName: string;
   classId?: string;
   topic?: string;
+  // Grouped-node filter (20 September 2026, Certification Prep's Quest
+  // map) - the real set of DB topics to pull questions from when a
+  // quest node represents more than one (e.g. a whole course module).
+  // `topic` above is still what gets stored on the attempt. Omitted by
+  // every other caller, unchanged.
+  topics?: string[];
   count?: number;
   profileId?: string;
   stageSize?: number;

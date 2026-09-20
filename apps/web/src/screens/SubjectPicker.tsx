@@ -20,6 +20,9 @@ import {
   Trophy,
 } from "lucide-react";
 import { assembleQuiz, getClassSubjects, getFeatures, getQuizInProgress, getTopicReports, getTopics, resumeQuiz } from "../api";
+// Certification Prep's Quest map groups by course module rather than
+// raw topic - see the questNodes construction below.
+import { CERT_COURSE_INFO } from "../data/certCourseInfo";
 import { useActivityHeartbeat } from "../hooks/useActivityHeartbeat";
 import type {
   AssembleQuizResponse,
@@ -306,6 +309,7 @@ export function SubjectPicker({
           subjectName: item.subjectName,
           classId: pkClass.id,
           topic: item.topic,
+          topics: item.matchTopics,
           profileId: profile.id,
           stageSize: QUEST_STAGE_SIZE,
         })
@@ -366,13 +370,40 @@ export function SubjectPicker({
   const subjectIndex = subjects?.findIndex((s) => s.name === selectedSubject) ?? 0;
   const jewel: Jewel = selectedSubject ? subjectVisual(selectedSubject, subjectIndex).jewel : "gold";
 
-  const questNodes: QuestNode[] | null =
-    topics && topicReports
-      ? buildQuestNodes(
-          topics.map((topic) => ({ subjectName: selectedSubject!, topic })),
-          (item) => topicReports.find((r) => r.topic === item.topic)?.accuracy ?? null
-        )
+  // Certification Prep certifications (any subject CERT_COURSE_INFO has
+  // an entry for) group their real DB topics into one quest node per
+  // course module instead of one per raw topic - see certCourseInfo.ts's
+  // own comment on CourseModule.topics for why. Every other subject
+  // keeps exactly today's one-node-per-topic behavior.
+  const courseInfo = selectedSubject ? CERT_COURSE_INFO[selectedSubject] : undefined;
+  const questItems: QuestJourneyItem[] | null = courseInfo
+    ? courseInfo.modules.map((mod) => ({ subjectName: selectedSubject!, topic: mod.name, matchTopics: mod.topics }))
+    : topics
+      ? topics.map((topic) => ({ subjectName: selectedSubject!, topic }))
       : null;
+
+  // A grouped node's accuracy is a real weighted average (summed
+  // correct/total across every one of its matchTopics) rather than a
+  // single exact-string lookup - /reports/topics already reports per raw
+  // granular tag regardless of which topic an attempt was launched
+  // under, so no backend change is needed to aggregate it here.
+  function accuracyForItem(item: QuestJourneyItem): number | null {
+    if (!topicReports) return null;
+    const tags = item.matchTopics ?? [item.topic];
+    let correct = 0;
+    let total = 0;
+    for (const tag of tags) {
+      const report = topicReports.find((r) => r.topic === tag);
+      if (report) {
+        correct += report.correct;
+        total += report.total;
+      }
+    }
+    return total > 0 ? correct / total : null;
+  }
+
+  const questNodes: QuestNode[] | null =
+    questItems && topicReports ? buildQuestNodes(questItems, accuracyForItem) : null;
   const doneCount = questNodes?.filter((n) => n.state === "completed").length ?? 0;
   const totalStars =
     questNodes?.reduce((sum, n) => sum + (n.state === "completed" ? starsFor(n.accuracy) : 0), 0) ?? 0;

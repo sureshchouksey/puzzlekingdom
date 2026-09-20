@@ -187,7 +187,16 @@ export type AssembleQuizResponse = {
 // player can play as an isolated, single-stage quiz. Built client-side
 // in SubjectPicker.tsx from getTopics/getTopicReports; nothing new is
 // stored on the backend for this part.
-export type QuestJourneyItem = { subjectName: string; topic: string };
+//
+// matchTopics (20 September 2026, Certification Prep's Quest map):
+// set only when this node actually represents several real DB topics
+// grouped into one (e.g. a whole course module) - the real tags to pull
+// questions from, passed as assembleQuiz's `topics`. `topic` stays the
+// single label stored on the attempt for resume/in-progress/accuracy
+// matching either way. Undefined for every ordinary one-topic-one-node
+// quest (every subject except Certification Prep), where behavior is
+// unchanged from before this field existed.
+export type QuestJourneyItem = { subjectName: string; topic: string; matchTopics?: string[] };
 
 // Tracks progress through a Quest Journey across the Quiz and Results
 // screens, so Results can offer "next quest" and jump straight into the

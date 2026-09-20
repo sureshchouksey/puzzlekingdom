@@ -67,6 +67,7 @@ export function Results({
         subjectName: nextItem.subjectName,
         classId: journey.pkClass.id,
         topic: nextItem.topic,
+        topics: nextItem.matchTopics,
         profileId: profile.id,
         stageSize: ALL_SUBJECTS_STAGE_SIZE,
       });
