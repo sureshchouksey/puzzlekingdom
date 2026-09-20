@@ -5,6 +5,58 @@ All notable Puzzle Kingdom releases are recorded here. From v1.0.0 onward,
 branches and lands on `main` at the next tagged release, not commit by
 commit.
 
+## v1.0.9 - 20 September 2026
+
+Everything built on `dev` since v1.0.8, commit `051183b`.
+
+### Legal & copyright production audit
+
+- Added a root `LICENSE` (proprietary/all-rights-reserved) and marked
+  every workspace `package.json` as `"license": "UNLICENSED"`.
+- Added a real Privacy Policy and Terms of Service, reachable both
+  pre-passcode (from the Gate screen) and post-login (from Welcome's new
+  footer) - see `plan/Legal-and-Copyright-Production-Audit.md` for the
+  full audit trail.
+- Added a persistent "not affiliated with, endorsed by, or sponsored by
+  Anthropic" disclaimer wherever Certification Prep content appears.
+- Replaced 8 unlicensed/unknown-provenance stock avatar images with
+  original hand-authored SVG portraits; the originals are archived
+  locally (gitignored), not deleted.
+- Rewrote every place Certification Prep content described itself as
+  "drawn from" or "authored from" Anthropic's own official course
+  material - it's independently written to cover the same public
+  topics, and now says so accurately everywhere, including in
+  `CertPrepHub.tsx`'s content summary.
+- Removed two categories of copyrighted/paywalled content from the live
+  database (not just this repo): the CSSE-derived "11+ Grammar Prep"
+  class, and 14 questions + 24 flashcards that had been built around
+  gated Anthropic Skilljar course detail rather than public
+  documentation.
+
+### Certification Prep: flashcards & mock test
+
+- A new `flashcards` table (migration 0028) and `GET /flashcards`
+  route; front/back study cards, subject-scoped and optionally
+  topic-tagged, seeded via a new `seed-flashcards` CLI.
+- A new `is_owner_profile` flag (migration 0028) lets a family owner
+  study through the same profile/quiz engine their kids use, without
+  showing up as a child on the family dashboard.
+- A new `categorize` question type (migration 0029): sort several items
+  into a small set of shared named buckets - genuinely different from
+  `match_column`'s strict 1:1 pairing.
+- `CertPrepHub.tsx` reworked into a two-step flow (choose a
+  certification once, then a hub with Content/Exam details and all four
+  actions already scoped to it) instead of re-asking on every
+  downstream screen.
+- A new timed Mock Test flow (`MockTest.tsx` / `MockExamResults.tsx`):
+  assembles every seeded question for a certification into one
+  full-length, real-exam-paced run, graded once at the end rather than
+  staged like a normal quiz.
+- New `apps/web/src/data/certExamInfo.ts` and `certCourseInfo.ts`:
+  reference exam logistics (from an independent third-party study
+  guide, clearly disclaimed as non-official) and the real Anthropic
+  course's own public module breakdown, both keyed by certification.
+
 ## v1.0.8 - 11 September 2026
 
 Everything built on `dev` since v1.0.7, commit `739f084`.
