@@ -5,6 +5,45 @@ All notable Puzzle Kingdom releases are recorded here. From v1.0.0 onward,
 branches and lands on `main` at the next tagged release, not commit by
 commit.
 
+## v1.0.10 - 20 September 2026
+
+Everything built on `dev` since v1.0.9, commits `f2edca0`..`032fea5`.
+
+### Certification Prep content fixes
+
+- Fixed a missing-space rendering bug in `CertPrepHub.tsx`'s content
+  summary ("...to coverClaude Certified...") caused by a JSX line break
+  swallowing the space between a text node and the next expression.
+- Removed the "Topics you can practice here" pills section from
+  `CertPrepHub.tsx`, which was listing the 10 granular DB sub-topics
+  that make up course module 1 as if they were standalone topics,
+  alongside the 5 real course modules already shown above it.
+
+### Quest map & Topic Practice grouped by course module
+
+- Certification Prep's Quest map and Topic Practice were both building
+  one node/card per raw database topic tag (15, for "Claude Certified
+  Architect - Professional") instead of the 5 real course modules shown
+  in the Content section - module 1's 10 granular sub-topics (Platform
+  Map & Primitives, Pattern Selection, RAG Pipeline Design, and so on)
+  were each showing up as their own quest node and practice card.
+- `certCourseInfo.ts`'s `CourseModule` now lists every real DB topic tag
+  that belongs to each module; module 1 folds in its 10 sub-topics plus
+  2 ambiguous ones confirmed with the user, modules 2-5 stay
+  single-topic.
+- `POST /quizzes` gains an optional `topics` array filter
+  (array-overlap match) alongside the existing single `topic`, which
+  keeps being the value stored on `quizAttempts.topic` - so
+  resume/in-progress/reporting needed zero changes.
+- Both `SubjectPicker.tsx`'s Quest map and its Topic Practice card list
+  now build from the same module-grouped list; a grouped node/card
+  starts one combined quiz across all of that module's underlying
+  topics, with accuracy shown as a weighted average across them.
+  `Results.tsx`'s "next quest" carries the same grouping through.
+- Topic Practice, Arcade, and every non-Certification-Prep subject are
+  unaffected - this only changes how Quest and Topic Practice group
+  nodes/cards for subjects that have course module info.
+
 ## v1.0.9 - 20 September 2026
 
 Everything built on `dev` since v1.0.8, commit `051183b`.
