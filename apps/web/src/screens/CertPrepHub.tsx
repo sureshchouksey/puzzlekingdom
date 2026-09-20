@@ -10,12 +10,11 @@ import {
   ExternalLink,
   GraduationCap,
   LayoutGrid,
-  ListChecks,
   Sparkles,
   Target,
   Timer,
 } from "lucide-react";
-import { getClassSubjects, getFeatures, getTopics } from "../api";
+import { getClassSubjects, getFeatures } from "../api";
 import type { PkClass, Subject } from "../types";
 import { Button } from "../components/ui/button";
 import { CERT_COURSE_INFO } from "../data/certCourseInfo";
@@ -93,7 +92,6 @@ export function CertPrepHub({
 }) {
   const [subjects, setSubjects] = useState<Subject[] | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(initialSubject ?? null);
-  const [topics, setTopics] = useState<string[] | null>(null);
   // Same kill-switch SubjectPicker/Home/StudyBuddy already check before
   // showing their own "Ask Sage" entry points - fails open (true) while
   // loading, same convention as everywhere else it's fetched.
@@ -131,20 +129,6 @@ export function CertPrepHub({
       setSelectedSubject(subjects[0].name);
     }
   }, [subjects, selectedSubject]);
-
-  // "Content" for the chosen certification - the same topic list every
-  // quiz mode and flashcard deck pulls from, shown here so the hub says
-  // what's actually covered before committing to an action.
-  useEffect(() => {
-    if (!certPrepClass || !selectedSubject) {
-      setTopics(null);
-      return;
-    }
-    setTopics(null);
-    getTopics({ classId: certPrepClass.id, subjectName: selectedSubject })
-      .then(setTopics)
-      .catch(() => setTopics([]));
-  }, [certPrepClass, selectedSubject]);
 
   const contentReady = certPrepClass !== null;
   const hasMultipleCerts = (subjects?.length ?? 0) > 1;
@@ -260,8 +244,8 @@ export function CertPrepHub({
                 )}
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                Every question, flashcard and Arcade game below was independently written to cover
-                {selectedSubject}&apos;s own topics - pick any action and it&apos;s already scoped to this certification.
+                Every question, flashcard and Arcade game below was independently written to cover {selectedSubject}
+                &apos;s own topics - pick any action and it&apos;s already scoped to this certification.
               </p>
 
               {/* The real Anthropic Skilljar learning path's own module
@@ -286,27 +270,6 @@ export function CertPrepHub({
                     </li>
                   ))}
                 </ol>
-              )}
-
-              <p className="mt-5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-                {CERT_COURSE_INFO[selectedSubject] ? "Topics you can practice here" : "Topics"}
-              </p>
-              {topics === null && <p className="mt-2 text-sm text-muted-foreground">Loading topics...</p>}
-              {topics !== null && topics.length === 0 && (
-                <p className="mt-2 text-sm text-muted-foreground">No topics seeded for this certification yet.</p>
-              )}
-              {topics !== null && topics.length > 0 && (
-                <ul className="mt-2 flex flex-wrap gap-2">
-                  {topics.map((topic) => (
-                    <li
-                      key={topic}
-                      className="flex items-center gap-1.5 rounded-full border border-border bg-secondary px-3 py-1 text-xs font-medium text-muted-foreground"
-                    >
-                      <ListChecks className="size-3" />
-                      {topic}
-                    </li>
-                  ))}
-                </ul>
               )}
             </section>
 
