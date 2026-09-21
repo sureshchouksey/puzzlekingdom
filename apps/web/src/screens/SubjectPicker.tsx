@@ -259,16 +259,20 @@ export function SubjectPicker({
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load topics"));
   }, [pkClass.id, selectedSubject]);
 
-  // Quest Journey needs each topic's real accuracy to lay out the path.
+  // Quest Journey needs each topic's real accuracy to lay out the path,
+  // and Topic Practice now shows the same stars/%/progress-bar per card
+  // (previously practice-only fetched nothing here and cards were plain
+  // Start/Continue buttons with no mastery info at all) - so both modes
+  // share this one fetch.
   useEffect(() => {
-    if (!selectedSubject || mode !== "quest") {
+    if (!selectedSubject || (mode !== "quest" && mode !== "practice")) {
       setTopicReports(null);
       return;
     }
     setTopicReports(null);
     getTopicReports({ classId: pkClass.id, subjectName: selectedSubject })
       .then(setTopicReports)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load the quest map"));
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load topic progress"));
   }, [pkClass.id, selectedSubject, mode]);
 
   // Topic Practice needs to know which topics (or "mixed practice", keyed
@@ -411,6 +415,13 @@ export function SubjectPicker({
   const doneCount = questNodes?.filter((n) => n.state === "completed").length ?? 0;
   const totalStars =
     questNodes?.reduce((sum, n) => sum + (n.state === "completed" ? starsFor(n.accuracy) : 0), 0) ?? 0;
+  // Topic Practice's own "mastered" count, independent of Quest's
+  // sequential lock/unlock order - every topic at or above
+  // COMPLETE_THRESHOLD counts, not just the ones Quest has unlocked yet.
+  const practiceMasteredCount =
+    questItems && topicReports
+      ? questItems.filter((item) => (accuracyForItem(item) ?? 0) >= COMPLETE_THRESHOLD).length
+      : 0;
   // The last topic in the journey is rendered as a distinct "final challenge"
   // castle node (Lovable reference: a Castle-of-Counting-style centered,
   // glowing node), separate from the alternating-line path of the topics
@@ -762,32 +773,63 @@ export function SubjectPicker({
                 for everyone else), so Topic Practice no longer shows the
                 10 granular sub-topics module 1 is made of as separate
                 cards. A grouped card's Start/Continue kicks off a combined
-                quiz across all of that module's underlying topics. */}
-            {questItems === null && !error && <p className="mt-8 text-center text-muted-foreground">Loading topics...</p>}
+                quiz across all of that module's underlying topics.
 
-            {questItems && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <PracticeCard
-                  icon={Shuffle}
-                  jewel={jewel}
-                  title="Mixed practice"
-                  subtitle="A bit of everything"
-                  inProgress={inProgressFor(undefined)}
-                  loading={loading}
-                  onClick={() => startPractice(undefined)}
-                />
-                {questItems.map((item) => (
+                Redesigned to match Quest's visual weight instead of a
+                plain button grid: a "topics mastered" progress bar up top
+                (same pill-and-fill pattern Quest's header uses), and each
+                card now shows real stars/%/progress bar off the same
+                topicReports data Quest and Reports already chart, with a
+                glowing jewel badge once a topic clears COMPLETE_THRESHOLD -
+                echoing Quest's "completed" node treatment. */}
+            {(questItems === null || topicReports === null) && !error && (
+              <p className="mt-8 text-center text-muted-foreground">Loading topics...</p>
+            )}
+
+            {questItems && topicReports && (
+              <>
+                {questItems.length > 0 && (
+                  <div className="mx-auto max-w-sm rounded-full bg-card/70 p-1.5">
+                    <div className="relative h-3 overflow-hidden rounded-full bg-secondary">
+                      <div
+                        className={`h-full rounded-full ${JEWEL_FILL[jewel]}`}
+                        style={{ width: `${(practiceMasteredCount / questItems.length) * 100}%` }}
+                      />
+                    </div>
+                    <p className="mt-2 pb-1 text-center text-xs font-semibold text-muted-foreground">
+                      {practiceMasteredCount} of {questItems.length} topic{questItems.length === 1 ? "" : "s"} mastered
+                    </p>
+                  </div>
+                )}
+
+                <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   <PracticeCard
-                    key={item.topic}
-                    icon={ListChecks}
+                    icon={Shuffle}
                     jewel={jewel}
-                    title={item.topic}
-                    inProgress={inProgressFor(item.topic)}
+                    title="Mixed practice"
+                    subtitle="A bit of everything"
+                    accuracy={null}
+                    special
+                    index={0}
+                    inProgress={inProgressFor(undefined)}
                     loading={loading}
-                    onClick={() => startPractice(item.topic, item.matchTopics)}
+                    onClick={() => startPractice(undefined)}
                   />
-                ))}
-              </div>
+                  {questItems.map((item, i) => (
+                    <PracticeCard
+                      key={item.topic}
+                      icon={ListChecks}
+                      jewel={jewel}
+                      title={item.topic}
+                      accuracy={accuracyForItem(item)}
+                      index={i + 1}
+                      inProgress={inProgressFor(item.topic)}
+                      loading={loading}
+                      onClick={() => startPractice(item.topic, item.matchTopics)}
+                    />
+                  ))}
+                </div>
+              </>
             )}
 
             {questItems && questItems.length === 0 && (
@@ -805,11 +847,21 @@ export function SubjectPicker({
   );
 }
 
+// Topic Practice's cards now carry the same visual weight Quest's path
+// nodes do, off the same topicReports data: a jewel-filled, glowing badge
+// once a topic clears COMPLETE_THRESHOLD (mirrors NodeBadge's "completed"
+// state below), a star row + live percentage, and a fill bar - instead of
+// a plain icon-and-button row with no mastery signal at all. `special`
+// gives Mixed Practice the floating glow Quest's "current" node uses, so
+// the one card that's never locked still reads as the stand-out action.
 function PracticeCard({
   icon: Icon,
   jewel,
   title,
   subtitle,
+  accuracy,
+  special,
+  index,
   inProgress,
   loading,
   onClick,
@@ -818,26 +870,72 @@ function PracticeCard({
   jewel: Jewel;
   title: string;
   subtitle?: string;
+  accuracy: number | null;
+  special?: boolean;
+  index: number;
   inProgress?: InProgress;
   loading: boolean;
   onClick: () => void;
 }) {
+  const mastered = accuracy !== null && accuracy >= COMPLETE_THRESHOLD;
   return (
     <button
       onClick={onClick}
       disabled={loading}
-      className="animate-pop-in shadow-quest flex items-center gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 text-left backdrop-blur transition-colors hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+      style={{ animationDelay: `${index * 60}ms` }}
+      className="animate-pop-in shadow-quest flex items-center gap-4 rounded-3xl border border-border/70 bg-card/85 p-4 text-left backdrop-blur transition-all hover:-translate-y-1 hover:border-primary/50 hover:shadow-glow focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60 disabled:hover:translate-y-0"
     >
-      <span className={`grid size-11 shrink-0 place-items-center rounded-full bg-secondary ${JEWEL_TEXT[jewel]}`}>
-        <Icon className="size-5" />
+      <span
+        className={`relative grid size-14 shrink-0 place-items-center rounded-full ${
+          special
+            ? `animate-float ${JEWEL_FILL[jewel]} ${JEWEL_GLOW[jewel]} text-background`
+            : mastered
+              ? `${JEWEL_FILL[jewel]} ${JEWEL_GLOW[jewel]} text-background`
+              : `bg-secondary ${JEWEL_TEXT[jewel]}`
+        }`}
+      >
+        <Icon className="size-6" />
+        {mastered && !special && (
+          <span className="absolute -right-1 -bottom-1 grid size-5 place-items-center rounded-full border-2 border-card bg-background">
+            <Check className={`size-3 ${JEWEL_TEXT[jewel]}`} strokeWidth={3} />
+          </span>
+        )}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-display font-semibold">{title}</span>
-        {subtitle && !inProgress && <span className="block text-xs text-muted-foreground">{subtitle}</span>}
-        {inProgress && (
-          <span className={`block text-xs font-semibold ${JEWEL_TEXT[jewel]}`}>
+        <span className="block truncate font-display font-bold">{title}</span>
+
+        {inProgress ? (
+          <span className={`mt-0.5 block text-xs font-semibold ${JEWEL_TEXT[jewel]}`}>
             Continue — stage {inProgress.stagesCleared + 1} of {inProgress.totalStages}
           </span>
+        ) : subtitle && accuracy === null ? (
+          <span className="mt-0.5 block text-xs text-muted-foreground">{subtitle}</span>
+        ) : accuracy === null ? (
+          <span className="mt-0.5 block text-xs text-muted-foreground">Not started yet</span>
+        ) : null}
+
+        {accuracy !== null && (
+          <>
+            <span className="mt-1.5 flex items-center gap-1.5">
+              <span className="flex gap-0.5">
+                {Array.from({ length: MAX_STARS }).map((_, s) => (
+                  <Star
+                    key={s}
+                    className={`size-3 ${
+                      s < starsFor(accuracy) ? `${JEWEL_TEXT[jewel]} fill-current` : "text-muted-foreground opacity-30"
+                    }`}
+                  />
+                ))}
+              </span>
+              <span className={`text-xs font-display font-bold ${JEWEL_TEXT[jewel]}`}>{Math.round(accuracy * 100)}%</span>
+            </span>
+            <span className="mt-1.5 block h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+              <span
+                className={`block h-full rounded-full ${JEWEL_FILL[jewel]}`}
+                style={{ width: `${Math.round(accuracy * 100)}%` }}
+              />
+            </span>
+          </>
         )}
       </span>
       <span
