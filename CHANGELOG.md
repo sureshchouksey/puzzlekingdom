@@ -5,6 +5,30 @@ All notable Puzzle Kingdom releases are recorded here. From v1.0.0 onward,
 branches and lands on `main` at the next tagged release, not commit by
 commit.
 
+## v1.0.11 - 21 September 2026
+
+Everything built on `dev` since v1.0.10, commit `341b970`.
+
+### Topic Practice redesign
+
+- Topic Practice's card list was a plain icon-and-button row with no
+  mastery signal at all - every card looked the same whether a topic
+  had never been opened or was already aced, unlike Quest's much
+  richer path of glowing badges, stars and progress fills right next
+  to it.
+- Topic Practice now fetches the same `topicReports` data Quest and
+  Reports already chart (previously Quest-only) and shows real
+  accuracy on every card: a jewel-filled, glowing badge with a
+  checkmark once a topic clears the same 70% mastery bar Quest uses, a
+  star row + live percentage, and a fill bar underneath.
+- Added a "topics mastered" summary progress bar above the grid,
+  matching Quest's own header pattern.
+- Mixed practice keeps a permanently floating, glowing gold badge - the
+  same treatment Quest gives its always-unlocked "current" node - so it
+  still reads as the one stand-out action among the topic cards.
+- Cards stagger in with the same per-index animation delay Quest's path
+  nodes use, with a subtle lift on hover.
+
 ## v1.0.10 - 20 September 2026
 
 Everything built on `dev` since v1.0.9, commits `f2edca0`..`032fea5`.
