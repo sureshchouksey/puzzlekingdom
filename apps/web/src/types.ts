@@ -136,7 +136,16 @@ export type GameKey =
   | "prompting_as_architecture"
   | "entry_points_governance"
   | "assembly_recap"
-  | "all_sections_mix";
+  | "all_sections_mix"
+  // Enterprise Integration & Production domain (module 2) - see
+  // GAME_DEFINITIONS in apps/api/src/routes/games.ts, which this mirrors
+  // exactly.
+  | "evals"
+  | "poc_to_prod"
+  | "sizing"
+  | "integration"
+  | "ab_obs"
+  | "module_2_mix";
 
 // One question as returned by GET /games/round - deliberately carries the
 // FULL answer key (correctOptionId / answerPayload, not stripped the way

@@ -143,6 +143,44 @@ const GAME_DEFINITIONS: Record<string, { questionTypes: QuestionTypeValue[]; top
     ],
     domain: "Claude Platform & Solution Design",
   },
+
+  // "Enterprise Integration & Production" domain (Claude Certified
+  // Architect - Professional practice, module 2) - same shape as the
+  // "Claude Platform & Solution Design" domain above: one game per real
+  // course section, topic-gated, plus a mix game. See
+  // docs/Professional Certifications/generated/claude-certified-architect-professional-module2-sections-source-note.txt
+  // for the content-provenance note (originally authored from Anthropic's
+  // public docs, never from the paid course itself).
+  evals: {
+    questionTypes: ["mcq"],
+    topic: "Evals",
+    domain: "Enterprise Integration & Production",
+  },
+  poc_to_prod: {
+    questionTypes: ["categorize"],
+    topic: "POC to Prod",
+    domain: "Enterprise Integration & Production",
+  },
+  sizing: {
+    questionTypes: ["true_false"],
+    topic: "Sizing",
+    domain: "Enterprise Integration & Production",
+  },
+  integration: {
+    questionTypes: ["match_column"],
+    topic: "Integration",
+    domain: "Enterprise Integration & Production",
+  },
+  ab_obs: {
+    questionTypes: ["categorize"],
+    topic: "A/B & Obs",
+    domain: "Enterprise Integration & Production",
+  },
+  module_2_mix: {
+    questionTypes: ["mcq", "true_false", "match_column", "categorize"],
+    topic: ["Evals", "POC to Prod", "Sizing", "Integration", "A/B & Obs"],
+    domain: "Enterprise Integration & Production",
+  },
 };
 
 // Flag-based feature management (migration 0023) - which app_settings

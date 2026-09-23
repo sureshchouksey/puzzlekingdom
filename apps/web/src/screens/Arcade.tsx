@@ -1,23 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   ArrowLeft,
   Blocks,
   Boxes,
   Brain,
   Building2,
+  Cable,
   CheckCircle2,
   Ear,
   Flame,
+  Gauge,
   Lightbulb,
   Link2,
   ListChecks,
   Map as MapIcon,
   PenLine,
+  Rocket,
   Shapes,
   Shuffle,
   ShieldCheck,
   SpellCheck,
   Star,
+  Target,
   Wand2,
   Workflow,
   X,
@@ -358,6 +363,102 @@ export const GAME_META: Record<
           detail: 'Because sections mix, the SAME word (like "decide") can mean something different depending on which section\'s question you\'re on - read the whole prompt, not just the trigger word.',
         },
         { title: "This is the one that counts", detail: "If you can move between sections without missing a beat here, you've actually learned the material, not just memorized one section's pattern." },
+      ],
+    },
+  },
+
+  // "Enterprise Integration & Production" domain (module 2) - same shape
+  // as the Claude Platform & Solution Design games above. See
+  // GAME_DEFINITIONS in apps/api/src/routes/games.ts.
+  evals: {
+    title: "Evals",
+    blurb: "What actually makes an evaluation trustworthy?",
+    icon: Target,
+    accent: "sapphire",
+    domain: "Enterprise Integration & Production",
+    tips: {
+      intro: "These test whether you know what makes an eval result something you can actually trust.",
+      tips: [
+        { title: "One good run proves nothing", detail: "Claude's outputs vary - a single successful try can pass by chance. A repeatable eval set run consistently is what actually shows a change is reliable." },
+        { title: "Pick the right grading method", detail: "Exact-match suits single-answer tasks; open-ended tasks need a rubric or LLM-as-judge, since there's more than one valid wording." },
+        { title: "Re-run the whole set, not just the fix", detail: "A change made to fix one case can quietly break another - the full eval set is what catches that regression." },
+        { title: "Include the hard cases", detail: "A set that's all happy-path input won't predict real-world failures - edge cases belong in the set too." },
+      ],
+    },
+  },
+  poc_to_prod: {
+    title: "POC to Prod",
+    blurb: "Sort each item: fine for a proof of concept, or needed before production?",
+    icon: Rocket,
+    accent: "emerald",
+    domain: "Enterprise Integration & Production",
+    tips: {
+      intro: "A proof of concept and a production system are held to very different standards - sort each item by which one it belongs to.",
+      tips: [
+        { title: "POC = prove the idea works at all", detail: "Hardcoded prompts, a key pasted into a script, and happy-path-only testing are normal shortcuts here - the point is speed, not resilience." },
+        { title: "Production = it has to survive reality", detail: "Retry/timeout handling, secrets management, monitoring, and testing beyond the happy path all become required, not optional." },
+        { title: 'Ask "would this survive a bad day?"', detail: "An outage, a malformed input, a security review - if the item wouldn't hold up, it's still POC-grade." },
+      ],
+    },
+  },
+  sizing: {
+    title: "Sizing",
+    blurb: "True or false: context windows, cost, and rate limits.",
+    icon: Gauge,
+    accent: "gold",
+    domain: "Enterprise Integration & Production",
+    tips: {
+      intro: "Quick true/false checks on context windows, cost, and rate limits - the tradeoffs, not just the definitions.",
+      tips: [
+        { title: "Tokens, not words", detail: "Context limits and cost are both counted in tokens - token count and word count aren't the same thing, especially outside plain English text." },
+        { title: "Caching rewards repetition", detail: "Prompt caching helps when the same large context is reused across many requests - a one-off prompt gets little benefit from it." },
+        { title: "Batch trades speed for cost", detail: "The Batch API is for non-urgent work processed asynchronously at lower cost - not for anything that needs an answer right now." },
+        { title: "Size for peak, not average", detail: "Rate limits get hit during traffic spikes, not the average case - sizing only for the average leaves a system unprepared for exactly when it matters." },
+      ],
+    },
+  },
+  integration: {
+    title: "Integration",
+    blurb: "Match each integration concept to what it actually does.",
+    icon: Cable,
+    accent: "ruby",
+    domain: "Enterprise Integration & Production",
+    tips: {
+      intro: "Match each concept to the problem it actually solves.",
+      tips: [
+        { title: "Sort by the problem, not the buzzword", detail: "Streaming is about delivery speed, tool use is about letting Claude act, MCP is about standardizing connections, idempotency is about reliability, webhooks are about async notification." },
+        { title: "Ask who's actually calling", detail: "A person talking to a chat app, your backend making a direct call, and an agent taking several autonomous steps are three different integration shapes." },
+        { title: "Sync vs async is a real fork", detail: "A direct API call waits for one answer; Batch and webhooks are both built around not waiting." },
+      ],
+    },
+  },
+  ab_obs: {
+    title: "A/B & Obs",
+    blurb: "Sort each practice: is it observability, or experimentation?",
+    icon: Activity,
+    accent: "amethyst",
+    domain: "Enterprise Integration & Production",
+    tips: {
+      intro: "Observability and experimentation ask two different questions - sort each practice by which one it answers.",
+      tips: [
+        { title: "Observability = what's happening right now", detail: "Latency, traces, error rates, cost dashboards, and alerts are all about seeing the live system as it actually behaves." },
+        { title: "Experimentation = which version is better", detail: "Comparing two prompt versions against a fixed eval set, or routing a slice of traffic to a candidate version, is about deciding between options with evidence." },
+        { title: "Change one thing at a time", detail: "A fair comparison holds everything else constant and changes a single variable - otherwise you can't tell what actually caused the difference." },
+      ],
+    },
+  },
+  module_2_mix: {
+    title: "Module 2 Mix",
+    blurb: "Every section in this module, shuffled into one round.",
+    icon: Shuffle,
+    accent: "sapphire",
+    domain: "Enterprise Integration & Production",
+    tips: {
+      intro: "Every section in Enterprise Integration & Production, shuffled into one round - a real test of whether it's all stuck.",
+      tips: [
+        { title: "No new rules here", detail: "Every question is pulled straight from the sections you've already practiced - if a question type looks unfamiliar, revisit that section's own tips first." },
+        { title: "Watch for the switch", detail: "Because sections mix, read the whole prompt each time rather than pattern-matching on the last section you were in." },
+        { title: "This is the one that counts", detail: "Moving between sections without missing a beat here means it's actually learned, not just memorized one section at a time." },
       ],
     },
   },

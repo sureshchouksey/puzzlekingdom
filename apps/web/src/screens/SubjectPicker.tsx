@@ -232,6 +232,12 @@ export function SubjectPicker({
       entry_points_governance: true,
       assembly_recap: true,
       all_sections_mix: true,
+      evals: true,
+      poc_to_prod: true,
+      sizing: true,
+      integration: true,
+      ab_obs: true,
+      module_2_mix: true,
     },
   });
   useEffect(() => {
@@ -640,7 +646,7 @@ export function SubjectPicker({
                               <Button
                                 size="sm"
                                 className="mt-3 rounded-full font-display"
-                                onClick={() => startQuest(i, questNodes.map(({ subjectName, topic }) => ({ subjectName, topic })))}
+                                onClick={() => startQuest(i, questNodes.map(({ subjectName, topic, matchTopics }) => ({ subjectName, topic, matchTopics })))}
                                 disabled={loading}
                               >
                                 <Play className="size-4" /> {loading ? "Starting..." : "Start quest"}
@@ -713,7 +719,7 @@ export function SubjectPicker({
                         onClick={() =>
                           startQuest(
                             questNodes!.length - 1,
-                            questNodes!.map(({ subjectName, topic }) => ({ subjectName, topic }))
+                            questNodes!.map(({ subjectName, topic, matchTopics }) => ({ subjectName, topic, matchTopics }))
                           )
                         }
                         disabled={loading}

@@ -75,7 +75,15 @@ export const CERT_COURSE_INFO: Record<string, CourseInfo> = {
         name: "Enterprise Integration & Production",
         durationMinutes: 158,
         focus: "Covers what it takes to carry a proven design from proof of concept through to enterprise-ready production.",
-        topics: ["Enterprise Integration & Production"],
+        // Split into its 5 real sections the same way "Claude Platform &
+        // Solution Design" was above (20 September 2026 grouping fix) -
+        // Evals, POC to Prod, Sizing, Integration, and A/B & Obs, added
+        // alongside the module's own flat tag (already used by the
+        // graded quiz/100-question set) so the Quest map and Topic
+        // Practice group into one node instead of showing raw section
+        // tags. See
+        // docs/Professional Certifications/generated/claude-certified-architect-professional-module2-sections-source-note.txt.
+        topics: ["Enterprise Integration & Production", "Evals", "POC to Prod", "Sizing", "Integration", "A/B & Obs"],
       },
       {
         name: "Responsible AI, Safety & Risk for Architects",
