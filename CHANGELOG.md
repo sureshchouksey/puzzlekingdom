@@ -5,6 +5,28 @@ All notable Puzzle Kingdom releases are recorded here. From v1.0.0 onward,
 branches and lands on `main` at the next tagged release, not commit by
 commit.
 
+## v1.0.12 - 23 September 2026
+
+Everything built on `dev` since v1.0.11, commit `95f9fce`.
+
+### Certification Prep: Module 2 Arcade games
+
+- Enterprise Integration & Production (Module 2) previously had no
+  Arcade games at all - only Module 1 (Claude Platform & Solution
+  Design) did. Added one game per real section (Evals, POC to Prod,
+  Sizing, Integration, A/B & Obs) plus a Module 2 Mix, 6 games total,
+  same shape as Module 1's 10.
+- `certCourseInfo.ts` now lists Module 2's 5 real sub-topics (it
+  previously held only the module's own flat topic), so the Quest map
+  and Topic Practice group Module 2 into one node the same way Module 1
+  already does, instead of leaving it as a single undifferentiated
+  topic.
+- Content: 24 new original questions (mcq, true/false, match_column,
+  categorize), grounded in Anthropic's public documentation, not the
+  paid certification course - same provenance discipline the
+  20 September copyright audit established for this feature. See
+  `claude-certified-architect-professional-module2-sections-source-note.txt`.
+
 ## v1.0.11 - 21 September 2026
 
 Everything built on `dev` since v1.0.10, commit `341b970`.
